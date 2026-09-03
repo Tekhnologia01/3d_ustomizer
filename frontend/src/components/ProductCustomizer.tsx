@@ -520,7 +520,6 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
           zones.find(z => z.side === side && z.source !== '3d' && zoneKey(z) === tabKey) ||
           zones.find(z => z.side === side && z.source !== '3d') ||
           zones.find(z => z.side === side && z.source === '2d') ||
-          zone3D ||
           zones.find(z => z.side === side);
 
         if (zone3D && zone2D) {

@@ -27,11 +27,11 @@ export function resolveImageUrl(
 }
 
 const imageCache: Record<string, HTMLImageElement> = {};
-const fetchCache: Record<string, Promise<HTMLImageElement>> = {};
+const fetchCache: Record<string, Promise<HTMLImageElement> | undefined> = {};
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   if (imageCache[url]) return Promise.resolve(imageCache[url]);
-  if (fetchCache[url]) return fetchCache[url];
+  if (fetchCache[url]) return fetchCache[url]!;
 
   const promise = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();

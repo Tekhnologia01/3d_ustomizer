@@ -825,6 +825,7 @@ export default function SetupThreePreview({
           quat.premultiply(roll);
         }
 
+        if (!modelGroupRef.current) return;
         let targetMesh: THREE.Mesh | null = null;
         const raycaster = new THREE.Raycaster();
         const originPt = localPt.clone().addScaledVector(localNrm, 0.5);
