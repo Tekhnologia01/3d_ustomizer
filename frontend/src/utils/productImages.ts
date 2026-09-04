@@ -1,5 +1,6 @@
 import type { Product } from '../types';
 import { extractDominantColor } from './canvasUtils';
+import { resolveMediaUrl } from './apiConfig';
 
 export function getSideImageUrl(product: Product, side: string): string {
   // Legacy fields mapping
@@ -22,8 +23,7 @@ export function resolveImageUrl(
   url: string | null | undefined,
   fallbackLabel = 'Product'
 ): string {
-  if (url && url.trim()) return url;
-  return `https://placehold.co/700x700/1a1a2e/6c63ff?text=${encodeURIComponent(fallbackLabel)}`;
+  return resolveMediaUrl(url, fallbackLabel);
 }
 
 const imageCache: Record<string, HTMLImageElement> = {};

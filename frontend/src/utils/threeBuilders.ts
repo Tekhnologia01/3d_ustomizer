@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Product } from '../types';
+import { resolveMediaUrl } from './apiConfig';
 
 // ─── Material Config ─────────────────────────────────────────────────────────
 
@@ -592,7 +593,13 @@ export function loadGLTFModel(
   opts: BuildModelOptions & { cylinderCanvas: HTMLCanvasElement; onLoaded?: () => void }
 ): void {
   const { product, onShapeResolved } = opts;
-  const url = product.model_3d_url!;
+  const rawUrl = product.model_3d_url || product.tripo_model_url;
+
+  if (!rawUrl) {
+    buildFallbackShape(opts);
+    return;
+  }
+  const url = resolveMediaUrl(rawUrl);
 
   // GLTF/Tripo models resolve as 'cylinder' so the customizer update path
   // knows how to paint the correct strip layout when designs are added.
@@ -625,7 +632,31 @@ export function loadGLTFModel(
       processGLTFModel(model, opts);
     })
     .catch((error) => {
-      console.error('GLTF load error:', error);
-      buildFallbackShape(opts);
+      console.error('GLTF load error for URL:', url, error);
+      delete gltfFetchCache[url];
+
+      // If primary model_3d_url failed (e.g. 404 Not Found), try tripo_model_url if present & different
+      const tripoUrl = product.tripo_model_url ? resolveMediaUrl(product.tripo_model_url) : null;
+
+      
+      
+      if (tripoUrl && tripoUrl !== url) {
+        console.warn('Attempting fallback to tripo_model_url:', tripoUrl);
+        const loader = new GLTFLoader();
+        loader.load(
+          tripoUrl,
+          (gltf) => {
+            gltfCache[tripoUrl] = gltf.scene;
+            processGLTFModel(gltf.scene.clone(), opts);
+          },
+          undefined,
+          (err) => {
+            console.error('Fallback tripo_model_url also failed:', err);
+            buildFallbackShape(opts);
+          }
+        );
+      } else {
+        buildFallbackShape(opts);
+      }
     });
 }

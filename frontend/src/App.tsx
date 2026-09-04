@@ -6,6 +6,8 @@ import SetupPage from './components/SetupPage';
 import ProductManager from './components/ProductManager';
 import ClientManager from './components/ClientManager';
 
+import { apiFetch } from './utils/apiConfig';
+
 // ------ Client context -----------------------------------------------------------------------
 interface ClientInfo {
   slug: string;
@@ -46,7 +48,7 @@ function AppShell({ clientInfo }: { clientInfo: ClientInfo }) {
       ? `/api/products/?client=${clientInfo.slug}`
       : '/api/products/';
 
-    fetch(url)
+    apiFetch(url)
       .then(res => res.json())
       .then(data => { setProducts(data); setLoading(false); })
       .catch(err => {
@@ -60,17 +62,16 @@ function AppShell({ clientInfo }: { clientInfo: ClientInfo }) {
     fetchProducts();
   }, [clientInfo.slug]);
 
-  // Poll products if any are pending Tripo generation
+  const hasPendingTripo = products.some(p => p.tripo_status === 'pending');
   useEffect(() => {
-    const hasPending = products.some(p => p.tripo_status === 'pending');
-    if (!hasPending) return;
+    if (!hasPendingTripo) return;
 
     const intervalId = setInterval(() => {
       fetchProducts();
     }, 10000); // Poll every 10 seconds
 
     return () => clearInterval(intervalId);
-  }, [products, clientInfo.slug]);
+  }, [hasPendingTripo, clientInfo.slug]);
 
   useEffect(() => {
     if (!clientInfo.isEmbed || products.length === 0 || selectedProduct) {
@@ -118,7 +119,7 @@ function AppShell({ clientInfo }: { clientInfo: ClientInfo }) {
     setLoading(true);
     setSelectedProduct(prod);
 
-    fetch(`/api/zones/${prod.id}/`)
+    apiFetch(`/api/zones/${prod.id}/`)
       .then(res => res.json())
       .then(data => {
         const parsedZones = (data.zones || []).map((z: any) => ({
@@ -166,7 +167,7 @@ function AppShell({ clientInfo }: { clientInfo: ClientInfo }) {
 
     // Persist the design submission to the backend for order/preview tracking.
     try {
-      const response = await fetch('/api/design-submissions/', {
+      const response = await apiFetch('/api/design-submissions/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -196,7 +197,7 @@ function AppShell({ clientInfo }: { clientInfo: ClientInfo }) {
       {/* Header — hidden in embed mode for a clean iframe */}
       {!clientInfo.isEmbed && currentPage !== 'customizer' && (
         <header>
-          <span className="logo" onClick={goSetup}>CustomCraft</span>
+          <span className="logo" onClick={goSetup}>Neura 3D</span>
           <nav>
 
             {currentPage !== 'setup' && (
@@ -278,7 +279,7 @@ function EmbedApp() {
   // Fetch client branding info
   useEffect(() => {
     if (!clientSlug) return;
-    fetch(`/api/client/${clientSlug}/`)
+    apiFetch(`/api/client/${clientSlug}/`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data) {

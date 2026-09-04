@@ -1,6 +1,5 @@
 // Tripo.ai API service for product 3D model generation
-
-const API_BASE_URL = 'http://127.0.0.1:8000/api'; // Update this to your backend URL
+import { apiFetch } from './apiConfig';
 
 export interface TripoTaskStatus {
   success: boolean;
@@ -23,7 +22,7 @@ export async function generateProduct3D(productId: number, textureQuality: 'stan
     const formData = new FormData();
     formData.append('texture_quality', textureQuality);
 
-    const response = await fetch(`${API_BASE_URL}/products/${productId}/generate-3d/`, {
+    const response = await apiFetch(`/api/products/${productId}/generate-3d/`, {
       method: 'POST',
       headers: {
         // Don't set Content-Type for FormData - browser will set it with boundary
@@ -53,7 +52,7 @@ export async function generateProduct3D(productId: number, textureQuality: 'stan
  */
 export async function getTripoTaskStatus(taskId: string): Promise<TripoTaskStatus> {
   try {
-    const response = await fetch(`${API_BASE_URL}/tripo/task-status/${taskId}/`, {
+    const response = await apiFetch(`/api/tripo/task-status/${taskId}/`, {
       method: 'GET',
     });
 
@@ -84,23 +83,23 @@ export async function pollTripoTask(
   timeout: number = 300000
 ): Promise<TripoTaskStatus> {
   const startTime = Date.now();
-  
+
   while (Date.now() - startTime < timeout) {
     try {
       const status = await getTripoTaskStatus(taskId);
-      
+
       if (onProgress) {
         onProgress(status.progress, status.status);
       }
-      
+
       if (status.status === 'success') {
         return status;
       }
-      
+
       if (status.status === 'failed' || status.status === 'cancelled' || status.status === 'banned') {
         throw new Error(`Task ${status.status}`);
       }
-      
+
       // Wait before polling again
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     } catch (error) {
@@ -108,8 +107,8 @@ export async function pollTripoTask(
       throw error;
     }
   }
-  
-  throw new Error(`Task timed out after ${timeout/1000} seconds`);
+
+  throw new Error(`Task timed out after ${timeout / 1000} seconds`);
 }
 
 /**
@@ -120,7 +119,7 @@ export async function pollTripoTask(
  */
 export async function completeTripoGeneration(taskId: string, productId: number): Promise<{ success: boolean; model_url: string; preview_url?: string; message: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/tripo/complete-generation/`, {
+    const response = await apiFetch(`/api/tripo/complete-generation/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

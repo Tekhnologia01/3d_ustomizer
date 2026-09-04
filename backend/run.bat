@@ -1,6 +1,6 @@
 @echo off
 echo ============================================
-echo   CustomCraft — Product Customizer Setup
+echo   Neura 3D — Product Customizer Setup
 echo ============================================
 echo.
 

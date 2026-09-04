@@ -134,32 +134,74 @@ class Product(models.Model):
     @property
     def get_image_url(self):
         if self.image:
-            return self.image.url
-        return self.image_url
+            try:
+                if self.image.storage.exists(self.image.name):
+                    return self.image.url
+            except Exception:
+                pass
+        if self.image_url and self.image_url.strip():
+            return self.image_url.strip()
+        return None
 
     @property
     def get_back_image_url(self):
         if self.back_image:
-            return self.back_image.url
-        return self.back_image_url
+            try:
+                if self.back_image.storage.exists(self.back_image.name):
+                    return self.back_image.url
+            except Exception:
+                pass
+        if self.back_image_url and self.back_image_url.strip():
+            return self.back_image_url.strip()
+        return None
 
     @property
     def get_left_image_url(self):
         if self.left_image:
-            return self.left_image.url
-        return self.left_image_url
+            try:
+                if self.left_image.storage.exists(self.left_image.name):
+                    return self.left_image.url
+            except Exception:
+                pass
+        if self.left_image_url and self.left_image_url.strip():
+            return self.left_image_url.strip()
+        return None
 
     @property
     def get_right_image_url(self):
         if self.right_image:
-            return self.right_image.url
-        return self.right_image_url
+            try:
+                if self.right_image.storage.exists(self.right_image.name):
+                    return self.right_image.url
+            except Exception:
+                pass
+        if self.right_image_url and self.right_image_url.strip():
+            return self.right_image_url.strip()
+        return None
 
     @property
     def get_top_image_url(self):
         if self.top_image:
-            return self.top_image.url
-        return self.top_image_url
+            try:
+                if self.top_image.storage.exists(self.top_image.name):
+                    return self.top_image.url
+            except Exception:
+                pass
+        if self.top_image_url and self.top_image_url.strip():
+            return self.top_image_url.strip()
+        return None
+
+    @property
+    def get_model_3d_url(self):
+        if self.model_3d:
+            try:
+                if self.model_3d.storage.exists(self.model_3d.name):
+                    return self.model_3d.url
+            except Exception:
+                pass
+        if self.tripo_model_url and self.tripo_model_url.strip():
+            return self.tripo_model_url.strip()
+        return None
 
     def save(self, *args, **kwargs):
         # Auto-generate a unique embed token so that the storefront can link
@@ -173,21 +215,21 @@ class Product(models.Model):
         # Save first so that the image file is actually processed and gets a URL
         super().save(*args, **kwargs)
         
-        # If images were uploaded, store their paths directly in the url columns
+        # If image file was uploaded and image_url is empty, set default fallback
         updated = False
-        if self.image and self.image_url != self.image.url:
+        if self.image and not self.image_url:
             self.image_url = self.image.url
             updated = True
-        if self.back_image and self.back_image_url != self.back_image.url:
+        if self.back_image and not self.back_image_url:
             self.back_image_url = self.back_image.url
             updated = True
-        if self.left_image and self.left_image_url != self.left_image.url:
+        if self.left_image and not self.left_image_url:
             self.left_image_url = self.left_image.url
             updated = True
-        if self.right_image and self.right_image_url != self.right_image.url:
+        if self.right_image and not self.right_image_url:
             self.right_image_url = self.right_image.url
             updated = True
-        if self.top_image and self.top_image_url != self.top_image.url:
+        if self.top_image and not self.top_image_url:
             self.top_image_url = self.top_image.url
             updated = True
 

@@ -1,13 +1,20 @@
 import json
 import time
+import os
+import re
+import logging
+from urllib.parse import urljoin, urlparse
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.text import slugify
+from django.core.files.base import ContentFile
 from .models import Product, DesignZone, Client, DesignSubmission
 import requests
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PAGE 1 — Product Gallery (Home)
@@ -33,7 +40,7 @@ def setup(request):
         'left_image_url': p.get_left_image_url,
         'right_image_url': p.get_right_image_url,
         'top_image_url': p.get_top_image_url,
-        'model_3d_url': p.model_3d.url if p.model_3d else None,
+        'model_3d_url': p.get_model_3d_url,
     } for p in products_qs]
     return render(request, 'customizer/setup.html', {'products_json': json.dumps(products)})
 
@@ -87,7 +94,7 @@ def get_zones(request, pk):
         'left_image_url': product.get_left_image_url,
         'right_image_url': product.get_right_image_url,
         'top_image_url': product.get_top_image_url,
-        'model_3d_url': product.model_3d.url if product.model_3d else None,
+        'model_3d_url': product.get_model_3d_url,
         'zones': zones,
     })
 
@@ -114,7 +121,7 @@ def customize(request, pk):
         'left_image_url': product.get_left_image_url,
         'right_image_url': product.get_right_image_url,
         'top_image_url': product.get_top_image_url,
-        'model_3d_url': product.model_3d.url if product.model_3d else None,
+        'model_3d_url': product.get_model_3d_url,
         'material': product.material.name if product.material else None,
         'imprint_methods': get_imprint_methods(product),
     }
@@ -157,7 +164,7 @@ def api_products(request):
         'left_image_url': p.get_left_image_url,
         'right_image_url': p.get_right_image_url,
         'top_image_url': p.get_top_image_url,
-        'model_3d_url': p.model_3d.url if p.model_3d else None,
+        'model_3d_url': p.get_model_3d_url,
         'external_product_url': p.external_product_url,
         'external_product_id': p.external_product_id,
         'embed_token': p.embed_token,
@@ -274,6 +281,49 @@ def delete_client(request, pk):
         return JsonResponse({'success': True})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
+
+
+def download_external_image(product, image_url, side='image'):
+    """
+    Downloads an external image URL and saves it locally (e.g. to product.image)
+    so it is served directly from the server disk, avoiding CORS & 403 hotlink blocks.
+    """
+    if not image_url or not str(image_url).strip().startswith('http'):
+        return False
+    try:
+        field_obj = getattr(product, side, None)
+        if field_obj and hasattr(field_obj, 'name') and field_obj.name:
+            if field_obj.storage.exists(field_obj.name):
+                return True
+    except Exception:
+        pass
+
+    try:
+        url = str(image_url).strip()
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+
+        content_type = resp.headers.get('Content-Type', '').lower()
+        ext = '.jpg'
+        if 'png' in content_type:
+            ext = '.png'
+        elif 'webp' in content_type:
+            ext = '.webp'
+        elif 'gif' in content_type:
+            ext = '.gif'
+
+        filename = f"product_{product.id}_{side}{ext}"
+        field_obj = getattr(product, side, None)
+        if field_obj is not None:
+            field_obj.save(filename, ContentFile(resp.content), save=True)
+            return True
+    except Exception as e:
+        logger.warning(f"Could not download external image for product {product.id} ({side}): {e}")
+    return False
 
 
 @csrf_exempt
@@ -405,6 +455,18 @@ def create_product(request):
         if updated:
             p.save()
 
+        # Auto-download external HTTP image URLs locally to prevent CORS/403 hotlinking issues
+        side_urls = {
+            'image': p.image_url,
+            'back_image': p.back_image_url,
+            'left_image': p.left_image_url,
+            'right_image': p.right_image_url,
+            'top_image': p.top_image_url,
+        }
+        for side, url_val in side_urls.items():
+            if url_val and url_val.startswith('http') and not getattr(p, side):
+                download_external_image(p, url_val, side)
+
         return JsonResponse({
             'success': True,
             'id': p.id,
@@ -415,7 +477,7 @@ def create_product(request):
             'left_image_url': p.get_left_image_url,
             'right_image_url': p.get_right_image_url,
             'top_image_url': p.get_top_image_url,
-            'model_3d_url': p.model_3d.url if p.model_3d else None,
+            'model_3d_url': p.get_model_3d_url,
             'external_product_url': p.external_product_url,
             'image_scraped': bool(p.image_url and external_url),  # Indicate if image was scraped
         })
@@ -572,6 +634,18 @@ def update_product(request, pk):
         if updated:
             p.save()
 
+        # Auto-download external HTTP image URLs locally to prevent CORS/403 hotlinking issues
+        side_urls = {
+            'image': p.image_url,
+            'back_image': p.back_image_url,
+            'left_image': p.left_image_url,
+            'right_image': p.right_image_url,
+            'top_image': p.top_image_url,
+        }
+        for side, url_val in side_urls.items():
+            if url_val and url_val.startswith('http') and not getattr(p, side):
+                download_external_image(p, url_val, side)
+
         return JsonResponse({
             'success': True,
             'id': p.id,
@@ -589,7 +663,7 @@ def update_product(request, pk):
             'left_image_url': p.get_left_image_url,
             'right_image_url': p.get_right_image_url,
             'top_image_url': p.get_top_image_url,
-            'model_3d_url': p.model_3d.url if p.model_3d else None,
+            'model_3d_url': p.get_model_3d_url,
             'image_scraped': bool(p.image_url and request.POST.get('external_product_url', '').strip()),
         })
     except Exception as e:
@@ -1176,7 +1250,7 @@ def complete_tripo_generation(request):
             
             return JsonResponse({
                 'success': True,
-                'model_url': product.model_3d.url,
+                'model_url': product.get_model_3d_url,
                 'preview_url': product.image.url if product.image else None,
                 'message': '3D model downloaded and stored successfully'
             })

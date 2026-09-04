@@ -8,6 +8,7 @@
  */
 
 import * as pdfjsLib from "pdfjs-dist";
+import { apiFetch } from "./apiConfig";
 
 // Point pdf.js to the bundled worker – Vite resolves the ?url correctly.
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -27,7 +28,7 @@ async function pdfToFile(file: File): Promise<File> {
   const viewport = page.getViewport({ scale: RENDER_SCALE });
 
   const canvas = document.createElement("canvas");
-  canvas.width  = viewport.width;
+  canvas.width = viewport.width;
   canvas.height = viewport.height;
 
   const ctx = canvas.getContext("2d")!;
@@ -46,7 +47,7 @@ async function epsToFile(file: File): Promise<File> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch("/api/convert-vector/", { method: "POST", body: formData });
+  const res = await apiFetch("/api/convert-vector/", { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Server returned ${res.status}`);

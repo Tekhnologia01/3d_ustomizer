@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Client } from '../types';
+import { apiFetch } from '../utils/apiConfig';
 
 interface Props {
   onBack: () => void;
@@ -40,7 +41,7 @@ export default function ClientManager({ onBack, showToast }: Props) {
   const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
-    fetch('/api/clients/')
+    apiFetch('/api/clients/')
       .then(res => res.json())
       .then(data => { setClients(data || []); setLoading(false); })
       .catch(err => { console.error(err); showToast('Failed to fetch clients.'); setLoading(false); });
@@ -81,7 +82,7 @@ export default function ClientManager({ onBack, showToast }: Props) {
     fd.append('is_active', form.is_active ? 'true' : 'false');
 
     try {
-      const res = await fetch(url, { method: 'POST', body: fd });
+      const res = await apiFetch(url, { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok || !data.success) {
         showToast(data.error || 'Client save failed.');
@@ -106,7 +107,7 @@ export default function ClientManager({ onBack, showToast }: Props) {
   const deleteClient = async (id: number) => {
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/clients/${id}/delete/`, {
+      const res = await apiFetch(`/api/clients/${id}/delete/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ _method: 'DELETE' }),

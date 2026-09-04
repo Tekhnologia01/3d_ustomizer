@@ -1,5 +1,5 @@
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  CustomCraft — Full Setup & Run" -ForegroundColor Cyan
+Write-Host "  Neura 3D — Full Setup & Run" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 

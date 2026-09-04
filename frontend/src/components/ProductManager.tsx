@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import type { Product } from '../types';
 import { resolveImageUrl } from '../utils/productImages';
 import { generateProduct3D, pollTripoTask, completeTripoGeneration, getTripoTaskStatus } from '../utils/tripoApi';
+import { apiFetch } from '../utils/apiConfig';
 
 interface ProductManagerProps {
   products: Product[];
@@ -139,7 +140,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
   };
 
   useEffect(() => {
-    fetch('/api/clients/')
+    apiFetch('/api/clients/')
       .then((res) => res.json())
       .then((data) => setClients(data || []))
       .catch((err) => {
@@ -178,7 +179,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
     setSubmissions([]);
     setSubmissionsLoading(true);
     try {
-      const res = await fetch(`/api/products/${p.id}/submissions/`);
+      const res = await apiFetch(`/api/products/${p.id}/submissions/`);
       const data = await res.json();
       setSubmissions(data.submissions || []);
     } catch {
@@ -199,22 +200,22 @@ export default function ProductManager({ products, onBack, showToast, onProducts
       tripo_model_url: p.tripo_model_url ?? '',
       tripo_status: p.tripo_status ?? '',
       imageUrls: {
-        front: p.image_url || '',
-        back: p.back_image_url || '',
-        left: p.left_image_url || '',
-        right: p.right_image_url || '',
-        top: p.top_image_url || '',
+        front: p.image_url && !p.image_url.startsWith('/media/') ? p.image_url : '',
+        back: p.back_image_url && !p.back_image_url.startsWith('/media/') ? p.back_image_url : '',
+        left: p.left_image_url && !p.left_image_url.startsWith('/media/') ? p.left_image_url : '',
+        right: p.right_image_url && !p.right_image_url.startsWith('/media/') ? p.right_image_url : '',
+        top: p.top_image_url && !p.top_image_url.startsWith('/media/') ? p.top_image_url : '',
       },
       images: {},
       imagePreviews: {
-        front: p.image_url || '',
-        back: p.back_image_url || '',
-        left: p.left_image_url || '',
-        right: p.right_image_url || '',
-        top: p.top_image_url || '',
+        front: resolveImageUrl(p.image_url),
+        back: resolveImageUrl(p.back_image_url),
+        left: resolveImageUrl(p.left_image_url),
+        right: resolveImageUrl(p.right_image_url),
+        top: resolveImageUrl(p.top_image_url),
       },
       model3d: null,
-      model3dName: p.model_3d_url ? p.model_3d_url.split('/').pop() || '' : '',
+      model3dName: (p.model_3d_url || p.tripo_model_url) ? (p.model_3d_url || p.tripo_model_url)!.split('/').pop() || '' : '',
     });
     setEditingId(p.id);
     setShowForm(true);
@@ -298,7 +299,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
       const url = editingId
         ? `/api/products/${editingId}/update/`
         : `/api/products/create/`;
-      const res = await fetch(url, { method: 'POST', body: fd });
+      const res = await apiFetch(url, { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok || !data.success) {
         showToast(data.error || 'Save failed.');
@@ -348,7 +349,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
   const handleDelete = async (id: number) => {
     setDeleting(id);
     try {
-      const res = await fetch(`/api/products/${id}/delete/`, {
+      const res = await apiFetch(`/api/products/${id}/delete/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ _method: 'DELETE' }),
@@ -371,7 +372,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
   /* ── reset tripo status ───────────────────────────────────── */
   const handleResetTripoStatus = async (id: number) => {
     try {
-      const res = await fetch(`/api/products/${id}/reset-tripo-status/`, {
+      const res = await apiFetch(`/api/products/${id}/reset-tripo-status/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -397,7 +398,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
 
     try {
       showToast(`Checking status for task: ${product.tripo_job_id}...`);
-      const res = await fetch(`/api/tripo/task-status/${product.tripo_job_id}/`);
+      const res = await apiFetch(`/api/tripo/task-status/${product.tripo_job_id}/`);
       const data = await res.json();
 
       if (!res.ok) {

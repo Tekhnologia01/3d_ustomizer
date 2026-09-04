@@ -41,6 +41,22 @@ export interface ThreeSceneRef {
   modelGroup: THREE.Group;
 }
 
+function disposeHierarchy(obj: THREE.Object3D) {
+  obj.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      if (mesh.material) {
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((m: any) => {
+          if (m.map && typeof m.map.dispose === 'function') m.map.dispose();
+          m.dispose();
+        });
+      }
+    }
+  });
+}
+
 export default function ThreeViewport({
   product,
   currentSide,
@@ -149,10 +165,14 @@ export default function ThreeViewport({
     if (!cylinderCanvas) return;
     setIsModelLoading(true);
 
+    disposeHierarchy(modelGroup);
     while (modelGroup.children.length > 0) {
       modelGroup.remove(modelGroup.children[0]);
     }
-    Object.keys(textures.current).forEach((key) => delete textures.current[key]);
+    Object.keys(textures.current).forEach((key) => {
+      textures.current[key]?.dispose();
+      delete textures.current[key];
+    });
 
     const cylinderTexture = new THREE.CanvasTexture(cylinderCanvas);
     const opts = {
@@ -168,7 +188,7 @@ export default function ThreeViewport({
       },
     };
 
-    if (product.model_3d_url) {
+    if (product.model_3d_url || product.tripo_model_url) {
       loadGLTFModel({
         ...opts,
         cylinderCanvas,
@@ -378,6 +398,13 @@ export default function ThreeViewport({
       cancelAnimationFrame(animFrameRef.current);
       resizeObserver.disconnect();
       controls.removeEventListener('change', updateZoomDisplay);
+      if (threeRef.current?.modelGroup) {
+        disposeHierarchy(threeRef.current.modelGroup);
+      }
+      Object.keys(textures.current).forEach((key) => {
+        textures.current[key]?.dispose();
+        delete textures.current[key];
+      });
       // Dispose environment map resources
       envTextureRef.current?.dispose();
       envTextureRef.current = null;

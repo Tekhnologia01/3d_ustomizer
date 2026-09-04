@@ -8,7 +8,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import type { Product, SetupZone, SideKey } from '../types';
-
+import { resolveMediaUrl } from '../utils/apiConfig';
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -55,7 +55,7 @@ function getProductBaseHex(name: string, dominantColor?: string | null): string 
 }
 
 function detectShape(product: Product): ShapeType {
-  if (product.model_3d_url) return 'cylinder';
+  if (product.model_3d_url || product.tripo_model_url) return 'cylinder';
   const n = (product.name || '').toLowerCase();
   const s = (product as any).shape_type || '';
   if (n.includes('bottle') || n.includes('flask') || n.includes('canteen') ||
@@ -242,6 +242,8 @@ export default function SetupThreePreview({
   const floorRef = useRef<THREE.Mesh | null>(null);
   const frameRef = useRef<number>(0);
   const shapeTypeRef = useRef<ShapeType>('flat');
+  // Shared single decal texture ref to prevent allocating 1024x1024 textures on every frame
+  const sharedDecalTexRef = useRef<THREE.CanvasTexture | null>(null);
   // PMREM-generated environment texture used for image-based lighting (IBL).
   // Disposed on unmount along with the generator itself.
   const envTextureRef = useRef<THREE.Texture | null>(null);
@@ -674,6 +676,12 @@ export default function SetupThreePreview({
       });
       decalMeshesRef.current = [];
 
+      // Clean up the shared decal texture and face textures
+      sharedDecalTexRef.current?.dispose();
+      sharedDecalTexRef.current = null;
+      Object.values(texturesRef.current).forEach((t) => t.dispose());
+      texturesRef.current = {};
+
       // Clean up the environment map + PMREM generator.
       envTextureRef.current?.dispose();
       envTextureRef.current = null;
@@ -800,7 +808,10 @@ export default function SetupThreePreview({
       modelGroupRef.current.rotation.set(0, 0, 0);
       modelGroupRef.current.updateMatrixWorld(true);
 
-      const decalTex = buildDecalTexture();
+      if (!sharedDecalTexRef.current) {
+        sharedDecalTexRef.current = buildDecalTexture();
+      }
+      const decalTex = sharedDecalTexRef.current;
 
       zonesRef.current.filter((z) => z.source === '3d' && z.point3d && z.normal3d && z.size3d).forEach((z) => {
         // All coordinates are stored in MODEL-GROUP LOCAL SPACE.
@@ -913,6 +924,9 @@ export default function SetupThreePreview({
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         mats.forEach((mat: any) => {
           if (!mat.map || mat.map.image !== cyl) {
+            if (mat.map && typeof mat.map.dispose === 'function') {
+              mat.map.dispose();
+            }
             mat.map = new THREE.CanvasTexture(cyl);
           }
           mat.map.needsUpdate = true;
@@ -997,7 +1011,7 @@ export default function SetupThreePreview({
 
     const name = (prod.name || '').toLowerCase();
     const shape = (prod as any).shape_type || '';
-    const model3dUrl = (prod as any).model_3d_url || '';
+    const model3dUrl = resolveMediaUrl((prod as any).model_3d_url || '');
 
     // Helper to finalize group after build
     const finalize = () => {

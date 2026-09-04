@@ -3,6 +3,7 @@ import type { Product, SetupZone } from '../types';
 import { getSideImageUrl, resolveImageUrl, preloadProductImages } from '../utils/productImages';
 import SetupThreePreview from './SetupThreePreview';
 import { Loader2 } from 'lucide-react';
+import { apiFetch } from '../utils/apiConfig';
 
 interface Props {
   products: Product[];
@@ -69,7 +70,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
   const [pickerSearch, setPickerSearch] = useState('');
 
   useEffect(() => {
-    fetch('/api/clients/')
+    apiFetch('/api/clients/')
       .then((res) => res.json())
       .then((data) => setClients(data || []))
       .catch((err) => {
@@ -137,7 +138,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
 
   const loadProductZones = useCallback(async (productId: number) => {
     try {
-      const res = await fetch(`/api/zones/${productId}/`);
+      const res = await apiFetch(`/api/zones/${productId}/`);
       const data = await res.json();
       setZones(
         (data.zones || []).map((z: {
@@ -383,7 +384,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
     }
     setSaveState('saving');
     try {
-      const res = await fetch('/api/save-zones/', {
+      const res = await apiFetch('/api/save-zones/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -463,22 +464,6 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
           onChange={(e) => updateZoneName(globalIndex, e.target.value)}
           className="pm-input pm-input-xs"
         />
-      </div>
-
-      <div className="sp-zone-sliders">
-        {(['w', 'h', 'x', 'y'] as const).map((prop) => (
-          <div key={prop} className="sp-slider-row">
-            <label>{prop.toUpperCase()} <span>{z[prop].toFixed(0)}%</span></label>
-            <input
-              type="range"
-              min={prop === 'x' || prop === 'y' ? 0 : 3}
-              max={95}
-              value={z[prop]}
-              onChange={(e) => updateZoneProp(globalIndex, prop, parseFloat(e.target.value))}
-              className="sp-range"
-            />
-          </div>
-        ))}
       </div>
 
       <div className="sp-zone-numrow">
