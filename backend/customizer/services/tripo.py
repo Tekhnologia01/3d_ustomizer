@@ -19,7 +19,7 @@ def retry_on_failure(max_retries=3, delay=1, backoff=2):
         def wrapper(*args, **kwargs):
             retries = 0
             current_delay = delay
-            last_exception = None
+            last_exception: Exception = RuntimeError('Retry loop exited unexpectedly')
             
             while retries < max_retries:
                 try:
@@ -46,9 +46,6 @@ class TripoService:
     
     @classmethod
     def get_headers(cls):
-        # Log partial API key for debugging (show first 8 and last 4 chars)
-        masked_key = f"{TRIPO_API_KEY[:8]}...{TRIPO_API_KEY[-4:]}" if len(TRIPO_API_KEY) > 12 else "***"
-        print(f"DEBUG: Using API key: {masked_key}")
         return {
             "Authorization": f"Bearer {TRIPO_API_KEY}",
             "Content-Type": "application/json"
@@ -61,16 +58,14 @@ class TripoService:
         Returns dict with balance information.
         """
         try:
-            # Use v3 endpoint for balance check
             url = "https://openapi.tripo3d.ai/v3/account/balance"
             response = requests.get(url, headers=cls.get_headers())
             response.raise_for_status()
             data = response.json()
-            
-            print(f"DEBUG: Balance check response: {data}")
+            logger.debug(f"Balance check response: {data}")
             return data
         except Exception as e:
-            print(f"DEBUG: Error checking balance: {e}")
+            logger.error(f"Error checking balance: {e}")
             raise
 
     @classmethod

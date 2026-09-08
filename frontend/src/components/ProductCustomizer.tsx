@@ -34,6 +34,7 @@ interface Props {
   onBack: () => void;
   showToast: (msg: string) => void;
   isEmbed?: boolean;
+  clientName?: string;
   onFinishDesign?: (data: CustomizationData) => void;
 }
 
@@ -114,7 +115,7 @@ function zoneKey(z: DesignZone): string {
   return (z.name && z.name.trim()) ? z.name.trim() : z.side;
 }
 
-export default function ProductCustomizer({ product, zones, onBack, showToast, isEmbed = false, onFinishDesign }: Props) {
+export default function ProductCustomizer({ product, zones, onBack, showToast, isEmbed = false, clientName, onFinishDesign }: Props) {
   // ── Side state ──────────────────────────────────────────────────────────────
   const getDefaultTab = () => {
     const firstZone = zones[0];
@@ -142,7 +143,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
   const [layers, setLayers] = useState<{ id: string; name: string; type: string; isSelected: boolean }[]>([]);
 
   // ── Imprint / Option states ──────────────────────────────────────────────────
-  const [productColorName, setProductColorName] = useState('White');
+  const [productColorName, setProductColorName] = useState(product.color_variants?.[0]?.name || 'Default');
   const [imprintLocationCount, setImprintLocationCount] = useState(2);
   const [imprintLocations, setImprintLocations] = useState<Record<string, string>>({
     'Location 1': 'Standard/Front',
@@ -174,9 +175,26 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
     'Pink': '#ec4899',
   };
 
+  const activeColorVariant = useMemo(
+    () => product.color_variants?.find(color => color.name === productColorName) || null,
+    [product.color_variants, productColorName]
+  );
+
+  useEffect(() => {
+    setProductColorName(product.color_variants?.[0]?.name || 'Default');
+  }, [product.id, product.color_variants]);
+  const displayProduct = useMemo(() => activeColorVariant ? ({
+    ...product,
+    image_url: activeColorVariant.image_url || product.image_url,
+    back_image_url: activeColorVariant.back_image_url || product.back_image_url,
+    left_image_url: activeColorVariant.left_image_url || product.left_image_url,
+    right_image_url: activeColorVariant.right_image_url || product.right_image_url,
+    top_image_url: activeColorVariant.top_image_url || product.top_image_url,
+  }) : product, [product, activeColorVariant]);
+
   const handleProductColorChange = (colorName: string) => {
     setProductColorName(colorName);
-    const hex = PRODUCT_COLORS[colorName];
+    const hex = product.color_variants?.find(color => color.name === colorName)?.hex_code || PRODUCT_COLORS[colorName];
     if (hex) {
       setDominantColor(hex);
     }
@@ -244,7 +262,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
     setImagesReady(false);
     preloadedImagesRef.current = {};
 
-    preloadProductImages(product).then(({ images, dominantColor: color }) => {
+    preloadProductImages(displayProduct).then(({ images, dominantColor: color }) => {
       preloadedImagesRef.current = images;
       setPreloadedImages(images);
       setDominantColor(color);
@@ -252,7 +270,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
     });
 
     preload({ model: 'isnet_fp16' }).catch((err: any) => console.log('Bg removal preload error:', err));
-  }, [product]);
+  }, [displayProduct]);
 
   // ── Global Toast Listener ───────────────────────────────────────────────────
   useEffect(() => {
@@ -1391,7 +1409,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
       <header className="studio-topbar">
         <button type="button" className="studio-brand" onClick={onBack}>
           <span><Layers size={18} /></span>
-          <strong>PromoStudio</strong>
+          <strong>{isEmbed ? (clientName || 'Neura 3D') : 'Neura 3D'}</strong>
         </button>
         <div className="studio-title-divider" />
         <div className="studio-product-heading">
@@ -1513,7 +1531,8 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
             removeBgEnabled={removeBgEnabled}
             setRemoveBgEnabled={setRemoveBgEnabled}
             isRemovingBg={isRemovingBg}
-            zones={zones} />
+            zones={zones}
+            colorVariants={product.color_variants} />
 
           <main className="studio-main">
 
@@ -1523,7 +1542,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
             >
               <FabricCanvas2D
                 ref={fabricHandle2DRef}
-                product={product}
+                product={displayProduct}
                 currentSide={currentSide}
                 selectedZoneId={selectedZoneId}
                 zones={zones}
@@ -1545,7 +1564,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
 
             <div style={{ display: viewMode === '3d' ? 'block' : 'none', width: '100%', height: '100%' }}>
               <ThreeViewport
-                product={product}
+                product={displayProduct}
                 currentSide={currentSide}
                 zones={zones3D}
                 dominantColor={dominantColor}
@@ -1569,7 +1588,7 @@ export default function ProductCustomizer({ product, zones, onBack, showToast, i
           </main>
 
           <RightSidebar
-            product={product}
+            product={displayProduct}
             zones={zones}
             currentSide={currentSide}
             onSideChange={changeSideTab}

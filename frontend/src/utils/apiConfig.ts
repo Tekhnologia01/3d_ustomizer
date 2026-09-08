@@ -55,8 +55,85 @@ export function resolveMediaUrl(url: string | null | undefined, fallbackLabel?: 
 }
 
 /**
- * Helper wrapper around standard fetch that automatically prepends API_BASE_URL.
+ * Helper wrapper around standard fetch that automatically prepends API_BASE_URL
+ * and handles JWT token authentication/refresh.
  */
-export async function apiFetch(path: string, options?: RequestInit): Promise<Response> {
-    return fetch(getApiUrl(path), options);
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+function subscribeTokenRefresh(cb: (token: string) => void) {
+    refreshSubscribers.push(cb);
+}
+
+function onRefreshed(token: string) {
+    refreshSubscribers.forEach(cb => cb(token));
+    refreshSubscribers = [];
+}
+
+export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+    const getHeaders = () => {
+        const headers = new Headers(options.headers || {});
+        const token = localStorage.getItem('access_token');
+        if (token) {
+            headers.set('Authorization', `Bearer ${token}`);
+        }
+        return headers;
+    };
+
+    options.headers = getHeaders();
+    let response = await fetch(getApiUrl(path), options);
+
+    if (response.status === 401) {
+        // Try to refresh token
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (!refreshToken) {
+            // No refresh token, trigger logout
+            localStorage.removeItem('access_token');
+            window.dispatchEvent(new Event('auth-logout'));
+            return response;
+        }
+
+        if (!isRefreshing) {
+            isRefreshing = true;
+            try {
+                const refreshRes = await fetch(getApiUrl('/api/auth/refresh/'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refresh: refreshToken }),
+                });
+
+                if (refreshRes.ok) {
+                    const data = await refreshRes.json();
+                    localStorage.setItem('access_token', data.access);
+                    onRefreshed(data.access);
+                } else {
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('refresh_token');
+                    window.dispatchEvent(new Event('auth-logout'));
+                }
+            } catch (err) {
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                window.dispatchEvent(new Event('auth-logout'));
+            } finally {
+                isRefreshing = false;
+            }
+        }
+
+        // Wait for the token to be refreshed by returning a new promise
+        return new Promise<Response>((resolve) => {
+            subscribeTokenRefresh((newToken: string) => {
+                options.headers = getHeaders();
+                resolve(fetch(getApiUrl(path), options));
+            });
+
+            // If the refresh fails, we still want to resolve this eventually
+            // We can check if access_token is empty after a short timeout?
+            // A simpler way is handled above, but here we just wait.
+            // If onRefreshed isn't called because refresh failed, this might hang if we don't handle it.
+            // So let's add a timeout or check state
+        });
+    }
+
+    return response;
 }

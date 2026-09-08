@@ -593,7 +593,7 @@ export function loadGLTFModel(
   opts: BuildModelOptions & { cylinderCanvas: HTMLCanvasElement; onLoaded?: () => void }
 ): void {
   const { product, onShapeResolved } = opts;
-  const rawUrl = product.model_3d_url || product.tripo_model_url;
+  const rawUrl = product.model_3d_url || (product as any).model_3d || product.tripo_model_url;
 
   if (!rawUrl) {
     buildFallbackShape(opts);

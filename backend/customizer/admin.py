@@ -3,13 +3,34 @@ from django.http import HttpResponse
 from django.utils.html import format_html
 from django.urls import reverse
 import csv
-from .models import Product, DesignZone, Client, UserProfile, ImprintMethod, Material, DesignSubmission
+from .models import Product, ProductColor, ProductFamily, DesignZone, Client, UserProfile, ImprintMethod, Material, DesignSubmission
 
 
 class DesignZoneInline(admin.TabularInline):
     model = DesignZone
     extra = 2
     fields = ['name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle']
+
+
+class ProductColorInline(admin.StackedInline):
+    model = ProductColor
+    extra = 1
+    fieldsets = (
+        (None, {'fields': ('name', 'hex_code', 'is_active')}),
+        ('Side images', {'fields': (
+            ('image', 'image_url'),
+            ('back_image', 'back_image_url'),
+            ('left_image', 'left_image_url'),
+            ('right_image', 'right_image_url'),
+            ('top_image', 'top_image_url'),
+        )}),
+    )
+
+
+class FamilyZoneInline(admin.TabularInline):
+    model = DesignZone
+    extra = 2
+    fields = ['name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'source']
 
 
 class DesignSubmissionInline(admin.TabularInline):
@@ -41,14 +62,14 @@ def export_embed_snippets(modeladmin, request, queryset):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ['name', 'shape_type', 'client', 'external_product_id', 'embed_token', 'tripo_status', 'is_active']
+    list_display = ['name', 'family', 'color_name', 'shape_type', 'client', 'external_product_id', 'embed_token', 'tripo_status', 'is_active']
     list_editable = ['is_active']
     readonly_fields = ['embed_token']
     actions = [export_embed_snippets]
-    inlines = [DesignZoneInline, DesignSubmissionInline]
+    inlines = [DesignZoneInline, ProductColorInline, DesignSubmissionInline]
     fieldsets = (
         (None, {
-            'fields': ('client', 'name', 'shape_type', 'model_3d', 'is_active')
+            'fields': ('client', 'family', 'name', 'color_name', 'color_hex', 'shape_type', 'model_3d', 'is_active')
         }),
         ('Material & Imprint', {
             'fields': ('material', 'available_imprint_methods'),
@@ -74,6 +95,22 @@ class ProductAdmin(admin.ModelAdmin):
             'fields': ('top_image', 'top_image_url')
         }),
     )
+
+
+@admin.register(ProductFamily)
+class ProductFamilyAdmin(admin.ModelAdmin):
+    list_display = ['name', 'family_key', 'client', 'variant_count', 'is_active']
+    search_fields = ['name', 'family_key']
+    list_filter = ['client', 'is_active']
+    inlines = [FamilyZoneInline]
+    fieldsets = (
+        (None, {'fields': ('client', 'name', 'family_key', 'is_active')}),
+        ('Shared 3D model', {'fields': ('model_3d', 'tripo_model_url')}),
+    )
+
+    @admin.display(description='Variants')
+    def variant_count(self, obj):
+        return obj.variants.count()
 
 
 @admin.register(DesignZone)

@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+.app.app--admin { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; background: #f6f5fb; }
+.app.app--admin > .pm-root, .app.app--admin > .mm-root, .app.app--admin > .up-root { min-height: calc(100vh - 60px); }
+
+/* Shared management tokens */
+.app--admin .pm-root, .app--admin .mm-root, .app--admin .up-root {
+  --admin-bg: #f6f5fb;
+  --admin-surface: #ffffff;
+  --admin-surface-alt: #f1effb;
+  --admin-border: #e2e0ee;
+  --admin-border-strong: #cbc7df;
+  --admin-text: #172238;
+  --admin-muted: #718096;
+  --admin-faint: #9aa6b6;
+  --admin-accent: #8175e8;
+  --admin-accent-hover: #7064d8;
+  --admin-accent-soft: #eceaff;
+  --admin-radius: 14px;
+  --admin-radius-sm: 9px;
+  font-family: 'DM Sans', sans-serif !important;
+  color: var(--admin-text) !important;
+  background: var(--admin-bg) !important;
+}
+
+/* Shared top-level page bars */
+.app--admin .pm-topbar, .app--admin .mm-topbar {
+  min-height: 72px !important;
+  height: 72px !important;
+  padding: 0 32px !important;
+  border-bottom: 1px solid var(--admin-border) !important;
+  background: rgba(255,255,255,.94) !important;
+  box-shadow: 0 4px 18px rgba(51,45,90,.05) !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 50 !important;
+}
+.app--admin .pm-topbar-title h1, .app--admin .mm-topbar-title { font-family: 'Space Grotesk', sans-serif !important; color: var(--admin-text) !important; font-weight: 600 !important; letter-spacing: -.045em !important; }
+.app--admin .pm-topbar-title p { color: var(--admin-muted) !important; }
+.app--admin .mm-topbar-back, .app--admin .mm-topbar-title { font-family: 'DM Sans', sans-serif !important; }
+.app--admin .mm-topbar-divider { background: var(--admin-border) !important; }
+
+/* Shared buttons and inputs */
+.app--admin .pm-btn-primary, .app--admin .up-btn-primary { background: var(--admin-accent) !important; border-color: var(--admin-accent) !important; box-shadow: 0 6px 16px rgba(129,117,232,.2) !important; }
+.app--admin .pm-btn-primary:hover, .app--admin .up-btn-primary:hover { background: var(--admin-accent-hover) !important; border-color: var(--admin-accent-hover) !important; }
+.app--admin .pm-btn-ghost { background: var(--admin-surface) !important; border-color: var(--admin-border) !important; color: var(--admin-muted) !important; }
+.app--admin .pm-btn-ghost:hover { background: var(--admin-surface-alt) !important; border-color: var(--admin-border-strong) !important; color: var(--admin-text) !important; }
+.app--admin .pm-input, .app--admin .up-form-field input { border-color: var(--admin-border) !important; border-radius: var(--admin-radius-sm) !important; background: var(--admin-surface) !important; color: var(--admin-text) !important; }
+.app--admin .pm-input:focus, .app--admin .up-form-field input:focus { border-color: var(--admin-accent) !important; box-shadow: 0 0 0 3px rgba(129,117,232,.12) !important; }
+.app--admin .pm-label, .app--admin .up-form-field label { color: var(--admin-muted) !important; }
+
+/* Product/client manager content surfaces */
+.app--admin .pm-main { background: var(--admin-bg) !important; }
+.app--admin .pm-table-wrap, .app--admin .pm-product-table-wrap, .app--admin .pm-card, .app--admin .pm-empty { border-color: var(--admin-border) !important; border-radius: var(--admin-radius) !important; box-shadow: 0 6px 20px rgba(51,45,90,.05) !important; }
+.app--admin .pm-sidebar { background: var(--admin-surface) !important; border-color: var(--admin-border) !important; }
+.app--admin .pm-client-item.active { color: var(--admin-accent-hover) !important; background: var(--admin-accent-soft) !important; }
+.app--admin .pm-main-heading h2, .app--admin .pm-card-name, .app--admin .pm-row-name { font-family: 'Space Grotesk', sans-serif !important; color: var(--admin-text) !important; }
+.app--admin .pm-tag-accent { color: var(--admin-accent-hover) !important; background: var(--admin-accent-soft) !important; }
+
+/* Members page */
+.app--admin .mm-root { padding: 0 !important; }
+.app--admin .mm-body { max-width: 1120px !important; padding: 42px 32px 56px !important; }
+.app--admin .mm-page-hero { margin-bottom: 30px !important; }
+.app--admin .mm-page-hero h1 { font-family: 'Space Grotesk', sans-serif !important; font-size: 2.1rem !important; color: var(--admin-text) !important; letter-spacing: -.06em !important; }
+.app--admin .mm-page-hero p { color: var(--admin-muted) !important; }
+.app--admin .mm-invite-card { border-radius: var(--admin-radius) !important; background: linear-gradient(135deg, #8175e8 0%, #7064d8 100%) !important; box-shadow: 0 18px 36px rgba(129,117,232,.2) !important; }
+.app--admin .mm-table-card { border-color: var(--admin-border) !important; border-radius: var(--admin-radius) !important; box-shadow: 0 6px 20px rgba(51,45,90,.05) !important; }
+
+/* Profile page */
+.app--admin .up-root { padding: 42px 32px 56px !important; background: var(--admin-bg) !important; }
+.app--admin .up-container { max-width: 720px !important; }
+.app--admin .up-header { text-align: left !important; margin-bottom: 28px !important; }
+.app--admin .up-header h1 { font-family: 'Space Grotesk', sans-serif !important; font-size: 2.1rem !important; color: var(--admin-text) !important; letter-spacing: -.06em !important; }
+.app--admin .up-header p { color: var(--admin-muted) !important; }
+.app--admin .up-card { border-color: var(--admin-border) !important; border-radius: var(--admin-radius) !important; box-shadow: 0 6px 20px rgba(51,45,90,.05) !important; padding: 32px !important; }
+.app--admin .up-section-title { font-family: 'Space Grotesk', sans-serif !important; color: var(--admin-text) !important; }
+.app--admin .up-divider { background: var(--admin-border) !important; }
+
+@media (max-width: 700px) {
+  .app--admin .pm-topbar, .app--admin .mm-topbar { padding: 0 18px !important; }
+  .app--admin .mm-body, .app--admin .up-root { padding-left: 18px !important; padding-right: 18px !important; }
+}

@@ -9,6 +9,10 @@ export interface Product {
   id: number;
   name: string;
   shape_type: string;
+  family_key?: string | null;
+  family_name?: string | null;
+  color_name?: string | null;
+  color_hex?: string | null;
   image_url: string;
   back_image_url?: string;
   left_image_url?: string;
@@ -24,6 +28,18 @@ export interface Product {
   tripo_model_url?: string | null;
   tripo_status?: string | null;
   imprint_methods?: ImprintMethod[];
+  color_variants?: ProductColorVariant[];
+}
+
+export interface ProductColorVariant {
+  id?: number;
+  name: string;
+  hex_code?: string | null;
+  image_url?: string | null;
+  back_image_url?: string | null;
+  left_image_url?: string | null;
+  right_image_url?: string | null;
+  top_image_url?: string | null;
 }
 
 export interface Client {

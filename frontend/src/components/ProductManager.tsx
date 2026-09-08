@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import type { Product } from '../types';
+import type { Product, ProductColorVariant } from '../types';
 import { resolveImageUrl } from '../utils/productImages';
 import { generateProduct3D, pollTripoTask, completeTripoGeneration, getTripoTaskStatus } from '../utils/tripoApi';
 import { apiFetch } from '../utils/apiConfig';
@@ -42,6 +42,10 @@ const PAGE_SIZES = [25, 50, 100, 200];
 interface FormState {
   name: string;
   shape_type: string;
+  parent_product_id?: number;
+  family_key?: string;
+  color_name?: string;
+  color_hex?: string;
   client_slug?: string;
   external_product_url?: string;
   external_product_id?: string;
@@ -51,13 +55,21 @@ interface FormState {
   imageUrls: Partial<Record<Side, string>>;
   images: Partial<Record<Side, File | null>>;
   imagePreviews: Partial<Record<Side, string>>;
+  clearedImages: Partial<Record<Side, boolean>>;
   model3d: File | null;
   model3dName: string;
+  colorVariants: ProductColorVariant[];
+  colorVariantFiles: Record<number, Partial<Record<Side, File>>>;
+  colorVariantPreviews: Record<number, Partial<Record<Side, string>>>;
 }
 
 const emptyForm = (): FormState => ({
   name: '',
   shape_type: 'flat',
+  parent_product_id: undefined,
+  family_key: '',
+  color_name: '',
+  color_hex: '',
   client_slug: undefined,
   external_product_url: '',
   external_product_id: '',
@@ -67,8 +79,12 @@ const emptyForm = (): FormState => ({
   imageUrls: {},
   images: {},
   imagePreviews: {},
+  clearedImages: {},
   model3d: null,
   model3dName: '',
+  colorVariants: [],
+  colorVariantFiles: {},
+  colorVariantPreviews: {},
 });
 
 const GLOBAL_KEY = '__global__';
@@ -85,6 +101,19 @@ export default function ProductManager({ products, onBack, showToast, onProducts
   const [deleting, setDeleting] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [loadedColorImages, setLoadedColorImages] = useState<Record<string, boolean>>({});
+  const [showExtraSides, setShowExtraSides] = useState(false);
+
+  // Determine if extra sides are already actively being used in this form
+  const isExtraSidesUsed = useMemo(() => {
+    return SIDES.slice(1).some(s =>
+      form.imagePreviews[s] ||
+      form.imageUrls[s] ||
+      form.colorVariants.some((c: any, i: number) => form.colorVariantPreviews[i]?.[s] || c[`${s}_image_url`])
+    );
+  }, [form]);
+
+  const visibleSides: Side[] = (showExtraSides || isExtraSidesUsed) ? SIDES : ['front'];
 
   // Tripo 3D generation state - supports concurrent generations
   const [activeGenerations, setActiveGenerations] = useState<Map<number, { progress: number; status: string }>>(new Map());
@@ -127,6 +156,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
     setForm(emptyForm());
     setEditingId(null);
     setShowForm(false);
+    setShowExtraSides(false);
   };
 
   const openCreateForm = () => {
@@ -156,7 +186,6 @@ export default function ProductManager({ products, onBack, showToast, onProducts
       );
 
       if (productsWithPendingTasks.length > 0) {
-        console.log(`Found ${productsWithPendingTasks.length} interrupted tasks, recovering...`);
 
         for (const product of productsWithPendingTasks) {
           try {
@@ -193,6 +222,9 @@ export default function ProductManager({ products, onBack, showToast, onProducts
     setForm({
       name: p.name,
       shape_type: p.shape_type || 'flat',
+      family_key: p.family_key ?? '',
+      color_name: p.color_name ?? '',
+      color_hex: p.color_hex ?? '',
       client_slug: p.client_slug ?? undefined,
       external_product_url: p.external_product_url ?? '',
       external_product_id: p.external_product_id ?? '',
@@ -214,8 +246,12 @@ export default function ProductManager({ products, onBack, showToast, onProducts
         right: resolveImageUrl(p.right_image_url),
         top: resolveImageUrl(p.top_image_url),
       },
+      clearedImages: {},
       model3d: null,
       model3dName: (p.model_3d_url || p.tripo_model_url) ? (p.model_3d_url || p.tripo_model_url)!.split('/').pop() || '' : '',
+      colorVariants: p.color_variants || [],
+      colorVariantFiles: {},
+      colorVariantPreviews: {},
     });
     setEditingId(p.id);
     setShowForm(true);
@@ -234,6 +270,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
       images: { ...prev.images, [side]: file },
       imageUrls: { ...prev.imageUrls, [side]: '' },
       imagePreviews: { ...prev.imagePreviews, [side]: url },
+      clearedImages: { ...prev.clearedImages, [side]: false },
     }));
   }, []);
 
@@ -243,6 +280,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
       imageUrls: { ...prev.imageUrls, [side]: url },
       images: { ...prev.images, [side]: null },
       imagePreviews: { ...prev.imagePreviews, [side]: url },
+      clearedImages: { ...prev.clearedImages, [side]: false },
     }));
   };
 
@@ -252,6 +290,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
       images: { ...prev.images, [side]: null },
       imageUrls: { ...prev.imageUrls, [side]: '' },
       imagePreviews: { ...prev.imagePreviews, [side]: '' },
+      clearedImages: { ...prev.clearedImages, [side]: true },
     }));
     const input = fileInputRefs.current[side];
     if (input) input.value = '';
@@ -265,6 +304,44 @@ export default function ProductManager({ products, onBack, showToast, onProducts
     }));
   };
 
+  const updateColorVariant = (index: number, patch: Partial<ProductColorVariant>) => {
+    setForm(prev => ({
+      ...prev,
+      colorVariants: prev.colorVariants.map((color, colorIndex) =>
+        colorIndex === index ? { ...color, ...patch } : color
+      ),
+    }));
+  };
+
+  const handleColorVariantFile = (index: number, side: Side, file: File | null) => {
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    const imageKey = `${index}-${side}`;
+    setLoadedColorImages(prev => ({ ...prev, [imageKey]: false }));
+    setForm(prev => ({
+      ...prev,
+      colorVariantFiles: {
+        ...prev.colorVariantFiles,
+        [index]: { ...(prev.colorVariantFiles[index] || {}), [side]: file },
+      },
+      colorVariantPreviews: {
+        ...prev.colorVariantPreviews,
+        [index]: { ...(prev.colorVariantPreviews[index] || {}), [side]: previewUrl },
+      },
+    }));
+  };
+
+  const markColorImageLoaded = (index: number, side: Side) => {
+    setLoadedColorImages(prev => ({ ...prev, [`${index}-${side}`]: true }));
+  };
+
+  const addColorVariant = () => {
+    setForm(prev => ({
+      ...prev,
+      colorVariants: [...prev.colorVariants, { name: '', hex_code: '' }],
+    }));
+  };
+
   /* ── submit ─────────────────────────────────────────────── */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,6 +351,16 @@ export default function ProductManager({ products, onBack, showToast, onProducts
     const fd = new FormData();
     fd.append('name', form.name.trim());
     fd.append('shape_type', form.shape_type);
+    if (form.family_key?.trim()) fd.append('family_key', form.family_key.trim());
+    if (form.color_name?.trim()) fd.append('color_name', form.color_name.trim());
+    if (form.color_hex?.trim()) fd.append('color_hex', form.color_hex.trim());
+    fd.append('color_variants', JSON.stringify(form.colorVariants));
+    form.colorVariants.forEach((color, index) => {
+      SIDES.forEach(side => {
+        const file = form.colorVariantFiles[index]?.[side];
+        if (file) fd.append(`color_${index}_${SIDE_API_FIELDS[side]}`, file);
+      });
+    });
     if (form.client_slug) fd.append('client_slug', form.client_slug);
     if (form.external_product_url) fd.append('external_product_url', form.external_product_url.trim());
     if (form.external_product_id) fd.append('external_product_id', form.external_product_id.trim());
@@ -288,8 +375,8 @@ export default function ProductManager({ products, onBack, showToast, onProducts
         fd.append(SIDE_URL_FIELDS[side], imageUrl);
       } else if (file) {
         fd.append(SIDE_API_FIELDS[side], file);
-      } else if (editingId) {
-        // Signal backend to clear this side's image when editing
+      } else if (editingId && form.clearedImages[side]) {
+        // Clear only when the admin explicitly removed this side's image.
         fd.append(`clear_${side}_image`, '1');
       }
     }
@@ -309,6 +396,11 @@ export default function ProductManager({ products, onBack, showToast, onProducts
         id: data.id,
         name: data.name,
         shape_type: data.shape_type,
+        family_key: data.family_key || null,
+        family_name: data.family_name || null,
+        color_name: data.color_name || null,
+        color_hex: data.color_hex || null,
+        color_variants: data.color_variants || [],
         client_slug: data.client_slug || null,
         external_product_url: data.external_product_url || null,
         external_product_id: data.external_product_id || null,
@@ -320,7 +412,7 @@ export default function ProductManager({ products, onBack, showToast, onProducts
         left_image_url: data.left_image_url || '',
         right_image_url: data.right_image_url || '',
         top_image_url: data.top_image_url || '',
-        model_3d_url: data.model_3d_url || null,
+        model_3d_url: data.model_3d_url || data.model_3d || null,
       };
       if (editingId) {
         onProductsChange(products.map(p => p.id === editingId ? updated : p));
@@ -408,8 +500,6 @@ export default function ProductManager({ products, onBack, showToast, onProducts
 
       const statusMessage = `Status: ${data.status}, Progress: ${data.progress}%`;
       showToast(statusMessage);
-
-      console.log('Tripo Task Status:', data);
 
       // If task succeeded, try to complete it
       if (data.status === 'success' && data.model_url) {
@@ -539,7 +629,6 @@ export default function ProductManager({ products, onBack, showToast, onProducts
           try {
             const errorData = JSON.parse((error as any).cause?.message || '{}');
             if (errorData.debug_info) {
-              console.log('Debug info:', errorData.debug_info);
               if (errorData.debug_info.total_images_found > 0) {
                 detailedMessage = `Found ${errorData.debug_info.total_images_found} images on the page but couldn't identify the main product image. Please upload the image directly.`;
               }
@@ -791,6 +880,31 @@ export default function ProductManager({ products, onBack, showToast, onProducts
     }
   };
 
+  const handleExportCSV = async () => {
+    try {
+      showToast('Preparing CSV export...');
+      const response = await apiFetch('/api/products/bulk-embed-export/');
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch CSV');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = 'products_bulk_export.csv';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('CSV Export Error:', err);
+      showToast('Error exporting CSV.');
+    }
+  };
+
   /* ── render ─────────────────────────────────────────────── */
   return (
     <div className="pm-root">
@@ -808,15 +922,13 @@ export default function ProductManager({ products, onBack, showToast, onProducts
           </div>
         </div>
         <div className="pm-topbar-right">
-          <a
-            href="/api/products/bulk-embed-export/"
+          <button
+            onClick={handleExportCSV}
             className="pm-btn pm-btn-ghost"
-            target="_blank"
-            rel="noreferrer"
           >
             <DownloadIcon />
             Export CSV
-          </a>
+          </button>
           <button className="pm-btn pm-btn-primary" onClick={openCreateForm}>
             <PlusIcon />
             Add product
@@ -1377,10 +1489,17 @@ export default function ProductManager({ products, onBack, showToast, onProducts
 
               {/* Side Images */}
               <div className="pm-field">
-                <label className="pm-label">Product images</label>
-                <p className="pm-field-help">Upload a file or paste a direct URL for each side. The URL is used when both are provided.</p>
+                <div className="pm-field-heading">
+                  <label className="pm-label">Product images</label>
+                  {visibleSides.length === 1 && (
+                    <button type="button" className="pm-btn pm-btn-ghost xs" onClick={() => setShowExtraSides(true)}>
+                      <PlusIcon /> Add back/sides
+                    </button>
+                  )}
+                </div>
+                <p className="pm-field-help">Upload a file or paste a direct URL. By default, only the front is required.</p>
                 <div className="pm-sides-grid">
-                  {SIDES.map(side => {
+                  {visibleSides.map(side => {
                     const preview = form.imagePreviews[side];
                     return (
                       <div key={side} className="pm-side-upload">
@@ -1424,6 +1543,102 @@ export default function ProductManager({ products, onBack, showToast, onProducts
                 </div>
               </div>
 
+              <div className="pm-field">
+                <div className="pm-field-heading">
+                  <label className="pm-label">Color variants</label>
+                  <button type="button" className="pm-btn pm-btn-ghost xs" onClick={addColorVariant}>
+                    <PlusIcon /> Add color
+                  </button>
+                </div>
+                <p className="pm-field-help">Add each color once. Zones and the 3D model stay shared on this product ID.</p>
+                {form.colorVariants.map((color, index) => (
+                  <div className="pm-color-variant" key={color.id ?? index}>
+                    <div className="pm-field-row">
+                      <input className="pm-input" placeholder="Color name" value={color.name} onChange={e => updateColorVariant(index, { name: e.target.value })} />
+                      <div className="pm-color-code-field">
+                        <input
+                          className="pm-color-picker"
+                          type="color"
+                          value={/^#[0-9a-f]{6}$/i.test(color.hex_code || '') ? color.hex_code! : '#9ca3af'}
+                          onChange={e => updateColorVariant(index, { hex_code: e.target.value.toUpperCase() })}
+                          aria-label={`Choose ${color.name || 'product'} color`}
+                        />
+                        <input
+                          className="pm-input pm-input-mono"
+                          placeholder="#17324D"
+                          value={color.hex_code || ''}
+                          onChange={e => updateColorVariant(index, { hex_code: e.target.value })}
+                          aria-label="Color hex code"
+                        />
+                      </div>
+                    </div>
+                    <div className="pm-color-variant-sides-grid" style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                      gap: '12px',
+                      marginTop: '8px'
+                    }}>
+                      {visibleSides.map(side => {
+                        const field = side === 'front' ? 'image_url' : `${side}_image_url` as keyof ProductColorVariant;
+                        const localPreview = form.colorVariantPreviews[index]?.[side];
+                        const savedImage = color[field] ? resolveImageUrl(String(color[field])) : '';
+                        const preview = localPreview || savedImage;
+                        const imageKey = `${index}-${side}`;
+                        const imageLoaded = loadedColorImages[imageKey];
+
+                        return (
+                          <div key={side} style={{
+                            display: 'flex', flexDirection: 'column', gap: '6px',
+                            background: '#f8fafc', padding: '10px', borderRadius: '8px',
+                            border: '1px solid #e2e8f0'
+                          }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              {SIDE_LABELS[side]}
+                            </span>
+
+                            <div className="pm-color-image-preview">
+                              {preview ? (
+                                <>
+                                  {!imageLoaded && <span className="pm-image-loader"><span className="pm-spinner dark" /></span>}
+                                  <img
+                                    src={preview}
+                                    alt={`${color.name || 'Color'} ${SIDE_LABELS[side]}`}
+                                    className={imageLoaded ? 'is-loaded' : ''}
+                                    onLoad={() => markColorImageLoaded(index, side)}
+                                  />
+                                </>
+                              ) : (
+                                <span>No image selected</span>
+                              )}
+                            </div>
+
+                            <label style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                              padding: '6px 8px', background: localPreview ? '#d1fae5' : '#ffffff',
+                              border: '1px solid', borderColor: localPreview ? '#34d399' : '#cbd5e1',
+                              borderRadius: '6px', fontSize: '0.7rem', fontWeight: 600,
+                              color: localPreview ? '#047857' : '#64748b', cursor: 'pointer',
+                              transition: 'all 0.15s ease'
+                            }}>
+                              {localPreview ? '✓ Replace image' : '📁 Upload image'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={e => handleColorVariantFile(index, side, e.target.files?.[0] || null)}
+                              />
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button type="button" className="pm-icon-btn sm danger" title="Remove color" onClick={() => setForm(prev => ({ ...prev, colorVariants: prev.colorVariants.filter((_, colorIndex) => colorIndex !== index) }))}>
+                      <TrashIcon />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
               {/* 3D Model */}
               <div className="pm-field">
                 <label className="pm-label">3D model file</label>
@@ -1449,7 +1664,8 @@ export default function ProductManager({ products, onBack, showToast, onProducts
             <div className="pm-drawer-footer">
               <button type="button" className="pm-btn pm-btn-ghost" onClick={resetForm}>Cancel</button>
               <button type="submit" form="pm-product-form" className="pm-btn pm-btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create product'}
+                {saving && <Spinner />}
+                {saving ? 'Saving changes...' : editingId ? 'Save changes' : 'Create product'}
               </button>
             </div>
           </div>
@@ -2235,6 +2451,22 @@ const PM_STYLES = `
 /* Fields / forms */
 .pm-field { margin-bottom: 18px; }
 .pm-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pm-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.pm-field-heading .pm-label { margin-bottom: 0; }
+.pm-color-variant { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; margin-top: 10px; border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); background: var(--pm-surface-alt); }
+.pm-color-code-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pm-color-picker { width: 40px; height: 38px; flex: 0 0 40px; padding: 3px; border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); background: var(--pm-surface); cursor: pointer; }
+.pm-color-code-field .pm-input { min-width: 0; }
+.pm-color-variant-images { display: flex; flex-direction: column; gap: 6px; }
+.pm-color-variant-files { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+.pm-color-file-label { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; color: var(--pm-text-muted); font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; }
+.pm-color-file-label input { width: 100%; min-width: 0; font-size: 0.6875rem; }
+.pm-color-variant > .pm-icon-btn { align-self: flex-end; }
+.pm-color-image-preview { position: relative; display: flex; align-items: center; justify-content: center; height: 92px; overflow: hidden; border: 1px solid var(--pm-border); border-radius: 6px; background: #fff; color: var(--pm-text-faint); font-size: 0.6875rem; text-align: center; }
+.pm-color-image-preview img { width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity .15s ease; }
+.pm-color-image-preview img.is-loaded { opacity: 1; }
+.pm-image-loader { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.8); z-index: 1; }
+.pm-spinner.dark { border-color: var(--pm-border-strong); border-top-color: var(--pm-accent); }
 .pm-label {
   display: block;
   font-size: 0.75rem;
@@ -2458,6 +2690,7 @@ const PM_STYLES = `
   .pm-main-controls { width: 100%; }
   .pm-drawer { width: 100%; }
   .pm-field-row { grid-template-columns: 1fr; }
+  .pm-color-variant-files { grid-template-columns: 1fr; }
   .pm-th-actions { width: 120px; }
   .pm-row-actions { gap: 2px; }
   .pm-pagination { flex-direction: column; align-items: stretch; gap: 10px; }

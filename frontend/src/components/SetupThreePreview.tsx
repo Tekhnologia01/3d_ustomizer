@@ -31,6 +31,7 @@ interface Props {
     size3d?: [number, number, number]
   ) => void;
   onDeleteZone?: (index: number) => void;
+  onReady?: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ function getProductBaseHex(name: string, dominantColor?: string | null): string 
 }
 
 function detectShape(product: Product): ShapeType {
-  if (product.model_3d_url || product.tripo_model_url) return 'cylinder';
+  if (product.model_3d_url || (product as any).model_3d || product.tripo_model_url) return 'cylinder';
   const n = (product.name || '').toLowerCase();
   const s = (product as any).shape_type || '';
   if (n.includes('bottle') || n.includes('flask') || n.includes('canteen') ||
@@ -230,6 +231,7 @@ export default function SetupThreePreview({
   zoneMode,
   onZonePlaced,
   onDeleteZone,
+  onReady,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -278,6 +280,7 @@ export default function SetupThreePreview({
   // scanned textures/materials) vs. a built-in primitive fallback, so texture
   // updates know whether it's safe to overwrite mesh materials.
   const isGltfModelRef = useRef(false);
+  const modelReadyRef = useRef(false);
 
   // Bounding radius of the currently-loaded model (post-normalization scale),
   // used to size decal projection boxes relative to the model's real size
@@ -794,6 +797,7 @@ export default function SetupThreePreview({
 
   function updateTextures() {
     if (!modelGroupRef.current) return;
+    if (!modelReadyRef.current) return;
     const pName = productRef.current?.name ?? '';
 
     // Handle GLTF models with real scanned textures/materials
@@ -995,6 +999,9 @@ export default function SetupThreePreview({
   // ── Model builders (ported from HTML verbatim) ────────────────────────────
 
   function buildModel(scene: THREE.Scene, prod: Product) {
+    modelReadyRef.current = false;
+    isGltfModelRef.current = false;
+
     // Remove old model
     if (modelGroupRef.current) {
       scene.remove(modelGroupRef.current);
@@ -1011,7 +1018,8 @@ export default function SetupThreePreview({
 
     const name = (prod.name || '').toLowerCase();
     const shape = (prod as any).shape_type || '';
-    const model3dUrl = resolveMediaUrl((prod as any).model_3d_url || '');
+    const rawModelUrl = (prod as any).model_3d_url || (prod as any).model_3d || prod.tripo_model_url || '';
+    const model3dUrl = resolveMediaUrl(rawModelUrl);
 
     // Helper to finalize group after build
     const finalize = () => {
@@ -1044,7 +1052,9 @@ export default function SetupThreePreview({
         controlsRef.current.update();
       }
 
+      modelReadyRef.current = true;
       updateTextures();
+      onReady?.();
     };
 
     if (model3dUrl) {

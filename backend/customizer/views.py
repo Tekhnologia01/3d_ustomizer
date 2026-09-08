@@ -10,7 +10,51 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
-from .models import Product, DesignZone, Client, DesignSubmission
+from .models import Product, ProductColor, ProductFamily, DesignZone, Client, DesignSubmission
+
+
+def serialize_product_colors(product):
+    return [{
+        'id': color.id,
+        'name': color.name,
+        'hex_code': color.hex_code,
+        'image_url': color.image_url_for('front'),
+        'back_image_url': color.image_url_for('back'),
+        'left_image_url': color.image_url_for('left'),
+        'right_image_url': color.image_url_for('right'),
+        'top_image_url': color.image_url_for('top'),
+    } for color in product.color_variants.filter(is_active=True)]
+
+
+def save_product_colors(product, raw_colors, files=None, replace=True):
+    if raw_colors is None:
+        return
+    colors = json.loads(raw_colors or '[]')
+    if replace:
+        product.color_variants.all().delete()
+    for index, item in enumerate(colors):
+        name = str(item.get('name', '')).strip()
+        if not name:
+            continue
+        color, _ = ProductColor.objects.update_or_create(
+            product=product,
+            name=name,
+            defaults={
+                'hex_code': str(item.get('hex_code', '')).strip() or None,
+                'image_url': str(item.get('image_url', '')).strip() or None,
+                'back_image_url': str(item.get('back_image_url', '')).strip() or None,
+                'left_image_url': str(item.get('left_image_url', '')).strip() or None,
+                'right_image_url': str(item.get('right_image_url', '')).strip() or None,
+                'top_image_url': str(item.get('top_image_url', '')).strip() or None,
+            },
+        )
+        for side in ('front', 'back', 'left', 'right', 'top'):
+            upload = files.get(f'color_{index}_{"image" if side == "front" else f"{side}_image"}') if files else None
+            if upload:
+                setattr(color, 'image' if side == 'front' else f'{side}_image', upload)
+                setattr(color, 'image_url' if side == 'front' else f'{side}_image_url', '')
+        if files:
+            color.save()
 import requests
 from django.conf import settings
 
@@ -41,6 +85,10 @@ def setup(request):
         'right_image_url': p.get_right_image_url,
         'top_image_url': p.get_top_image_url,
         'model_3d_url': p.get_model_3d_url,
+        'color_variants': serialize_product_colors(p),
+        'family_key': p.family.family_key if p.family else None,
+        'color_name': p.color_name,
+        'color_hex': p.color_hex,
     } for p in products_qs]
     return render(request, 'customizer/setup.html', {'products_json': json.dumps(products)})
 
@@ -55,11 +103,14 @@ def save_zones(request):
         zones = data.get('zones', [])
 
         product = get_object_or_404(Product, pk=product_id)
-        # Clear existing zones and replace
-        product.zones.all().delete()
+        # Family-linked variants share one zone set; product zones remain an
+        # explicit override for exceptional variants.
+        zone_owner = product.family if product.family else product
+        zone_owner.zones.all().delete()
         for z in zones:
             DesignZone.objects.create(
-                product=product,
+                product=None if product.family else product,
+                family=product.family,
                 name=z.get('name', ''),
                 side=z.get('side', 'front'),
                 zone_type=z['zone_type'],
@@ -84,7 +135,10 @@ def save_zones(request):
 def get_zones(request, pk):
     """API: Return product info + its design zones, side images, and shape type."""
     product = get_object_or_404(Product, pk=pk)
-    zones = list(product.zones.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d'))
+    zones_qs = product.zones.all()
+    if not zones_qs.exists() and product.family:
+        zones_qs = product.family.zones.all()
+    zones = list(zones_qs.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d'))
     return JsonResponse({
         'id': product.id,
         'name': product.name,
@@ -94,8 +148,10 @@ def get_zones(request, pk):
         'left_image_url': product.get_left_image_url,
         'right_image_url': product.get_right_image_url,
         'top_image_url': product.get_top_image_url,
+        'model_3d': product.get_model_3d_url,
         'model_3d_url': product.get_model_3d_url,
         'zones': zones,
+        'color_variants': serialize_product_colors(product),
     })
 
 
@@ -104,7 +160,10 @@ def get_zones(request, pk):
 # ─────────────────────────────────────────────────────────────────────────────
 def customize(request, pk):
     product = get_object_or_404(Product, pk=pk, is_active=True)
-    zones = list(product.zones.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d'))
+    zones_qs = product.zones.all()
+    if not zones_qs.exists() and product.family:
+        zones_qs = product.family.zones.all()
+    zones = list(zones_qs.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d'))
     
     def get_imprint_methods(p):
         methods = list(p.available_imprint_methods.all())
@@ -121,6 +180,7 @@ def customize(request, pk):
         'left_image_url': product.get_left_image_url,
         'right_image_url': product.get_right_image_url,
         'top_image_url': product.get_top_image_url,
+        'model_3d': product.get_model_3d_url,
         'model_3d_url': product.get_model_3d_url,
         'material': product.material.name if product.material else None,
         'imprint_methods': get_imprint_methods(product),
@@ -164,6 +224,7 @@ def api_products(request):
         'left_image_url': p.get_left_image_url,
         'right_image_url': p.get_right_image_url,
         'top_image_url': p.get_top_image_url,
+        'model_3d': p.get_model_3d_url,
         'model_3d_url': p.get_model_3d_url,
         'external_product_url': p.external_product_url,
         'external_product_id': p.external_product_id,
@@ -173,7 +234,12 @@ def api_products(request):
         'tripo_status': p.tripo_status,
         'material': p.material.name if p.material else None,
         'client_slug': p.client.slug if p.client else None,
+        'family_key': p.family.family_key if p.family else None,
+        'family_name': p.family.name if p.family else None,
+        'color_name': p.color_name,
+        'color_hex': p.color_hex,
         'imprint_methods': get_imprint_methods(p),
+        'color_variants': serialize_product_colors(p),
     } for p in products_qs]
     return JsonResponse(products, safe=False)
 
@@ -344,6 +410,44 @@ def create_product(request):
             if client:
                 p.client = client
 
+        parent_product_id = request.POST.get('parent_product_id', '').strip()
+        parent_product = Product.objects.filter(pk=parent_product_id).first() if parent_product_id else None
+        if parent_product:
+            if not p.client:
+                p.client = parent_product.client
+            p.shape_type = parent_product.shape_type
+            if not parent_product.family:
+                family_key = f'product-{parent_product.pk}'
+                family = ProductFamily.objects.create(
+                    family_key=family_key,
+                    name=parent_product.name,
+                    client=parent_product.client,
+                )
+                if parent_product.model_3d:
+                    family.model_3d.name = parent_product.model_3d.name
+                family.tripo_model_url = parent_product.tripo_model_url
+                family.save(update_fields=['model_3d', 'tripo_model_url'])
+                parent_product.family = family
+                parent_product.save(update_fields=['family'])
+            else:
+                family_key = parent_product.family.family_key
+                family = parent_product.family
+                if not family.get_model_3d_url() and parent_product.model_3d:
+                    family.model_3d.name = parent_product.model_3d.name
+                    family.tripo_model_url = parent_product.tripo_model_url
+                    family.save(update_fields=['model_3d', 'tripo_model_url'])
+            p.family = parent_product.family
+        else:
+            family_key = request.POST.get('family_key', '').strip()
+        if family_key:
+            family, _ = ProductFamily.objects.get_or_create(
+                family_key=family_key,
+                defaults={'name': request.POST.get('family_name', '').strip() or name, 'client': p.client},
+            )
+            p.family = family
+        p.color_name = request.POST.get('color_name', '').strip() or None
+        p.color_hex = request.POST.get('color_hex', '').strip() or None
+
         for field in ['external_product_url', 'external_product_id', 'tripo_job_id', 'tripo_model_url', 'tripo_status']:
             val = request.POST.get(field, '').strip()
             if val:
@@ -431,6 +535,9 @@ def create_product(request):
                     else:
                         logger.warning(f"Could not scrape image from {external_url}")
                         
+                except requests.exceptions.HTTPError as e:
+                    logger.warning(f"HTTP Error scraping {external_url}: {e.response.status_code}")
+                    logger.warning(f"Response body snippet: {e.response.text[:300]}")
                 except Exception as e:
                     logger.warning(f"Failed to scrape image from external_product_url: {e}")
                     # Don't fail the product creation if scraping fails
@@ -455,6 +562,8 @@ def create_product(request):
         if updated:
             p.save()
 
+        save_product_colors(p, request.POST.get('color_variants'), request.FILES)
+
         # Auto-download external HTTP image URLs locally to prevent CORS/403 hotlinking issues
         side_urls = {
             'image': p.image_url,
@@ -477,9 +586,16 @@ def create_product(request):
             'left_image_url': p.get_left_image_url,
             'right_image_url': p.get_right_image_url,
             'top_image_url': p.get_top_image_url,
+            'model_3d': p.get_model_3d_url,
             'model_3d_url': p.get_model_3d_url,
             'external_product_url': p.external_product_url,
+            'external_product_id': p.external_product_id or None,
+            'family_key': p.family.family_key if p.family else None,
+            'family_name': p.family.name if p.family else None,
+            'color_name': p.color_name,
+            'color_hex': p.color_hex,
             'image_scraped': bool(p.image_url and external_url),  # Indicate if image was scraped
+            'color_variants': serialize_product_colors(p),
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -504,6 +620,19 @@ def update_product(request, pk):
             client = Client.objects.filter(slug=client_slug, is_active=True).first()
             if client:
                 p.client = client
+        family_key = request.POST.get('family_key', '').strip()
+        if family_key:
+            family, _ = ProductFamily.objects.get_or_create(
+                family_key=family_key,
+                defaults={'name': request.POST.get('family_name', '').strip() or p.name, 'client': p.client},
+            )
+            p.family = family
+        elif 'family_key' in request.POST:
+            p.family = None
+        if 'color_name' in request.POST:
+            p.color_name = request.POST.get('color_name', '').strip() or None
+        if 'color_hex' in request.POST:
+            p.color_hex = request.POST.get('color_hex', '').strip() or None
         is_active = request.POST.get('is_active')
         if is_active is not None:
             p.is_active = is_active.lower() in ('true', '1', 'yes')
@@ -594,6 +723,9 @@ def update_product(request, pk):
                     else:
                         logger.warning(f"Could not scrape image from {external_url}")
                         
+                except requests.exceptions.HTTPError as e:
+                    logger.warning(f"HTTP Error scraping {external_url}: {e.response.status_code}")
+                    logger.warning(f"Response body snippet: {e.response.text[:300]}")
                 except Exception as e:
                     logger.warning(f"Failed to scrape image from external_product_url: {e}")
                     # Don't fail the product update if scraping fails
@@ -634,6 +766,9 @@ def update_product(request, pk):
         if updated:
             p.save()
 
+        if 'color_variants' in request.POST:
+            save_product_colors(p, request.POST.get('color_variants'), request.FILES)
+
         # Auto-download external HTTP image URLs locally to prevent CORS/403 hotlinking issues
         side_urls = {
             'image': p.image_url,
@@ -654,6 +789,10 @@ def update_product(request, pk):
             'client_slug': p.client.slug if p.client else None,
             'external_product_url': p.external_product_url or None,
             'external_product_id': p.external_product_id or None,
+            'family_key': p.family.family_key if p.family else None,
+            'family_name': p.family.name if p.family else None,
+            'color_name': p.color_name,
+            'color_hex': p.color_hex,
             'tripo_job_id': p.tripo_job_id or None,
             'tripo_model_url': p.tripo_model_url or None,
             'tripo_status': p.tripo_status or None,
@@ -663,8 +802,10 @@ def update_product(request, pk):
             'left_image_url': p.get_left_image_url,
             'right_image_url': p.get_right_image_url,
             'top_image_url': p.get_top_image_url,
+            'model_3d': p.get_model_3d_url,
             'model_3d_url': p.get_model_3d_url,
             'image_scraped': bool(p.image_url and request.POST.get('external_product_url', '').strip()),
+            'color_variants': serialize_product_colors(p),
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -1163,6 +1304,7 @@ def complete_tripo_generation(request):
         
         # Get the product
         product = get_object_or_404(Product, pk=product_id)
+        model_owner = product.family if product.family and not product.family.get_model_3d_url() else product
         
         # Download the model file with retry logic
         logger.info(f"Downloading 3D model from Tripo: {model_url}")
@@ -1189,9 +1331,10 @@ def complete_tripo_generation(request):
             model_temp_path = temp_file.name
         
         try:
-            # Save the model file to the product's model_3d field
+            # Save the first family-linked model on the family so every color
+            # variant can reuse it without another Tripo generation.
             with open(model_temp_path, 'rb') as f:
-                product.model_3d.save(f'{product.name.replace(" ", "_")}_3d.glb', File(f), save=False)
+                model_owner.model_3d.save(f'{product.name.replace(" ", "_")}_3d.glb', File(f), save=False)
             
             logger.info(f"Model downloaded successfully, size: {len(model_response.content)} bytes")
             
@@ -1245,12 +1388,16 @@ def complete_tripo_generation(request):
             
             # Save the product with all the updated fields
             product.tripo_status = 'success'
-            product.tripo_model_url = model_url  # Keep the original URL as reference
+            if model_owner is product:
+                product.tripo_model_url = model_url  # Keep the original URL as reference
+            else:
+                model_owner.tripo_model_url = model_url
+                model_owner.save(update_fields=['model_3d', 'tripo_model_url'])
             product.save()
             
             return JsonResponse({
                 'success': True,
-                'model_url': product.get_model_3d_url,
+                'model_url': model_owner.get_model_3d_url(),
                 'preview_url': product.image.url if product.image else None,
                 'message': '3D model downloaded and stored successfully'
             })

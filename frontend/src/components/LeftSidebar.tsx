@@ -11,7 +11,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { ImprintMethod, DesignZone } from '../types';
+import type { ImprintMethod, DesignZone, ProductColorVariant } from '../types';
 import { ACCEPTED_IMAGE_TYPES } from '../utils/vectorToImage';
 import { PANTONE_COLORS } from '../utils/pantoneColors';
 
@@ -68,24 +68,10 @@ interface Props {
   setRemoveBgEnabled: (v: boolean) => void;
   isRemovingBg: boolean;
   zones: DesignZone[];
+  colorVariants?: ProductColorVariant[];
 }
 
 type PanelKey = 'color' | 'location' | 'method' | 'upload' | 'text' | 'layers';
-
-const COLOR_SWATCHES = [
-  { name: 'White', hex: '#ffffff' },
-  { name: 'Black', hex: '#111827' },
-  { name: 'Navy', hex: '#17324d' },
-  { name: 'Red', hex: '#dc2626' },
-  { name: 'Green', hex: '#15803d' },
-  { name: 'Silver', hex: '#9ca3af' },
-  { name: 'Blue', hex: '#2563eb' },
-  { name: 'Teal', hex: '#0f9f91' },
-  { name: 'Violet', hex: '#7c3aed' },
-  { name: 'Yellow', hex: '#fbbf24' },
-  { name: 'Orange', hex: '#f97316' },
-  { name: 'Pink', hex: '#ec4899' },
-];
 
 const PRODUCT_GROUPS = ['Classic', 'Tumbler', 'Water', 'Unisex'];
 const LOCATION_OPTIONS = ['Standard/Front', 'Back', 'Left', 'Right', 'Top', 'Wraparound'];
@@ -180,6 +166,7 @@ export default function LeftSidebar({
   setRemoveBgEnabled,
   isRemovingBg,
   zones,
+  colorVariants = [],
 }: Props) {
   const [openPanels, setOpenPanels] = useState<Record<PanelKey, boolean>>({
     color: true,
@@ -197,8 +184,13 @@ export default function LeftSidebar({
   const fontsList = ['Inter', 'Arial', 'Georgia', 'Impact', 'Verdana', 'Courier New', 'Times New Roman'];
   const methodsList = availableImprintMethods.length > 0 ? availableImprintMethods : FALLBACK_METHODS;
   const selectedColor = useMemo(
-    () => COLOR_SWATCHES.find((c) => c.name === productColorName) || COLOR_SWATCHES[0],
-    [productColorName]
+    () => {
+      const variant = colorVariants.find((c) => c.name === productColorName);
+      return variant
+        ? { name: variant.name, hex: variant.hex_code || '#ffffff' }
+        : { name: 'Default', hex: '#ffffff' };
+    },
+    [colorVariants, productColorName]
   );
   const selectedMethod = methodsList.find((m) => m.name === imprintMethod);
   const supportsColor = selectedMethod?.supports_color ?? true;
@@ -261,19 +253,19 @@ export default function LeftSidebar({
         onToggle={togglePanel}
       >
         <div className="studio-swatch-grid" role="list" aria-label="Product colors">
-          {COLOR_SWATCHES.map((color) => (
+          {([{ name: 'Default', hex_code: '#ffffff' }, ...colorVariants].map((color) => (
             <button
-              key={color.name}
+              key={color.id ?? color.name}
               type="button"
               className={`studio-swatch ${productColorName === color.name ? 'active' : ''}`}
-              style={{ backgroundColor: color.hex }}
+              style={{ backgroundColor: color.hex_code || '#ffffff' }}
               onClick={() => setProductColorName(color.name)}
               title={color.name}
               aria-label={color.name}
             >
               {productColorName === color.name && <span className="studio-swatch-check" />}
             </button>
-          ))}
+          )))}
         </div>
         <div className="studio-selected-color">
           <span className="studio-selected-dot" style={{ backgroundColor: selectedColor.hex }} />
@@ -428,7 +420,7 @@ export default function LeftSidebar({
 
         <div className="studio-divider" />
 
-     
+
         {placementMode && (
           <div className="studio-stamp-options">
             <div className="studio-segmented">

@@ -80,6 +80,30 @@ class UserProfile(models.Model):
         return f"{self.user.username} - {self.get_role_display()}"
 
 
+class ProductFamily(models.Model):
+    """Shared geometry and imprint configuration for color variants."""
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='product_families', null=True, blank=True)
+    name = models.CharField(max_length=150)
+    family_key = models.CharField(max_length=150, unique=True)
+    model_3d = models.FileField(upload_to='models/families/', null=True, blank=True)
+    tripo_model_url = models.URLField(max_length=2000, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def get_model_3d_url(self):
+        if self.model_3d:
+            try:
+                return self.model_3d.url
+            except Exception:
+                pass
+        return self.tripo_model_url.strip() if self.tripo_model_url and self.tripo_model_url.strip() else None
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['name']
+
+
 class Product(models.Model):
     """Product with an optional local image file or remote image URL for multiple sides."""
     SHAPE_CHOICES = [
@@ -88,7 +112,10 @@ class Product(models.Model):
         ('flat', 'Flat Surface (Cover, Tee)'),
     ]
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='products', null=True, blank=True)
+    family = models.ForeignKey(ProductFamily, on_delete=models.SET_NULL, related_name='variants', null=True, blank=True)
     name      = models.CharField(max_length=150)
+    color_name = models.CharField(max_length=100, blank=True, null=True)
+    color_hex = models.CharField(max_length=7, blank=True, null=True)
     shape_type = models.CharField(max_length=150, choices=SHAPE_CHOICES, default='flat')
     model_3d = models.FileField(upload_to='models/', null=True, blank=True, help_text="Upload 3D model (.gltf or .glb) file")
     external_product_url = models.CharField(max_length=2000, null=True, blank=True, help_text='Original storefront product URL (e.g. Nike.com link).')
@@ -135,8 +162,7 @@ class Product(models.Model):
     def get_image_url(self):
         if self.image:
             try:
-                if self.image.storage.exists(self.image.name):
-                    return self.image.url
+                return self.image.url
             except Exception:
                 pass
         if self.image_url and self.image_url.strip():
@@ -147,8 +173,7 @@ class Product(models.Model):
     def get_back_image_url(self):
         if self.back_image:
             try:
-                if self.back_image.storage.exists(self.back_image.name):
-                    return self.back_image.url
+                return self.back_image.url
             except Exception:
                 pass
         if self.back_image_url and self.back_image_url.strip():
@@ -159,8 +184,7 @@ class Product(models.Model):
     def get_left_image_url(self):
         if self.left_image:
             try:
-                if self.left_image.storage.exists(self.left_image.name):
-                    return self.left_image.url
+                return self.left_image.url
             except Exception:
                 pass
         if self.left_image_url and self.left_image_url.strip():
@@ -171,8 +195,7 @@ class Product(models.Model):
     def get_right_image_url(self):
         if self.right_image:
             try:
-                if self.right_image.storage.exists(self.right_image.name):
-                    return self.right_image.url
+                return self.right_image.url
             except Exception:
                 pass
         if self.right_image_url and self.right_image_url.strip():
@@ -183,8 +206,7 @@ class Product(models.Model):
     def get_top_image_url(self):
         if self.top_image:
             try:
-                if self.top_image.storage.exists(self.top_image.name):
-                    return self.top_image.url
+                return self.top_image.url
             except Exception:
                 pass
         if self.top_image_url and self.top_image_url.strip():
@@ -195,13 +217,12 @@ class Product(models.Model):
     def get_model_3d_url(self):
         if self.model_3d:
             try:
-                if self.model_3d.storage.exists(self.model_3d.name):
-                    return self.model_3d.url
+                return self.model_3d.url
             except Exception:
                 pass
         if self.tripo_model_url and self.tripo_model_url.strip():
             return self.tripo_model_url.strip()
-        return None
+        return self.family.get_model_3d_url() if self.family else None
 
     def save(self, *args, **kwargs):
         # Auto-generate a unique embed token so that the storefront can link
@@ -243,6 +264,41 @@ class Product(models.Model):
         ordering = ['name']
 
 
+class ProductColor(models.Model):
+    """A color/appearance variant that belongs to one product ID."""
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='color_variants')
+    name = models.CharField(max_length=100)
+    hex_code = models.CharField(max_length=7, blank=True, null=True)
+    image = models.ImageField(upload_to='products/colors/', null=True, blank=True)
+    image_url = models.CharField(max_length=1000, blank=True, null=True)
+    back_image = models.ImageField(upload_to='products/colors/', null=True, blank=True)
+    back_image_url = models.CharField(max_length=1000, blank=True, null=True)
+    left_image = models.ImageField(upload_to='products/colors/', null=True, blank=True)
+    left_image_url = models.CharField(max_length=1000, blank=True, null=True)
+    right_image = models.ImageField(upload_to='products/colors/', null=True, blank=True)
+    right_image_url = models.CharField(max_length=1000, blank=True, null=True)
+    top_image = models.ImageField(upload_to='products/colors/', null=True, blank=True)
+    top_image_url = models.CharField(max_length=1000, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+
+    def image_url_for(self, side='front'):
+        file_field = getattr(self, 'image' if side == 'front' else f'{side}_image')
+        url_field = getattr(self, 'image_url' if side == 'front' else f'{side}_image_url')
+        if file_field:
+            try:
+                return file_field.url
+            except Exception:
+                pass
+        return url_field.strip() if url_field and url_field.strip() else None
+
+    def __str__(self):
+        return f'{self.product.name} - {self.name}'
+
+    class Meta:
+        ordering = ['name']
+        constraints = [models.UniqueConstraint(fields=['product', 'name'], name='unique_product_color_name')]
+
+
 
 class DesignZone(models.Model):
     """
@@ -253,7 +309,8 @@ class DesignZone(models.Model):
         ('logo', 'Logo Zone'),
         ('text', 'Text Zone'),
     ]
-    product       = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='zones')
+    product       = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='zones', null=True, blank=True)
+    family        = models.ForeignKey(ProductFamily, on_delete=models.CASCADE, related_name='zones', null=True, blank=True)
     side          = models.CharField(max_length=50, default='front')
     name          = models.CharField(max_length=50, blank=True, null=True, help_text="Optional custom name (e.g. 'Left Chest') to display as a view.")
     zone_type     = models.CharField(max_length=10, choices=ZONE_TYPE)
@@ -270,7 +327,8 @@ class DesignZone(models.Model):
     size3d        = models.JSONField(null=True, blank=True, help_text="[w,h,d] decal bounds in 3D world space")
 
     def __str__(self):
-        return f"{self.product.name} — {self.get_zone_type_display()}"
+        owner_name = self.product.name if self.product else (self.family.name if self.family else 'Unassigned')
+        return f"{owner_name} - {self.get_zone_type_display()}"
 
     class Meta:
         ordering = ['zone_type']

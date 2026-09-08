@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+﻿import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import type { Product, SetupZone } from '../types';
 import { getSideImageUrl, resolveImageUrl, preloadProductImages } from '../utils/productImages';
 import SetupThreePreview from './SetupThreePreview';
@@ -60,6 +60,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [imagesReady, setImagesReady] = useState(false);
   const [isProductLoading, setIsProductLoading] = useState(false);
+  const [is3DReady, setIs3DReady] = useState(false);
   const [dominantColor, setDominantColor] = useState<string | null>(null);
   const [preloadedImages, setPreloadedImages] = useState<Record<string, HTMLImageElement>>({});
   const [zoneFilter, setZoneFilter] = useState<ZoneFilter>('all');
@@ -68,6 +69,18 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
   const [clients, setClients] = useState<{ id: number; name: string; slug: string }[]>([]);
   const [pickerClientKey, setPickerClientKey] = useState<string>('');
   const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerDropdownOpen, setPickerDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setPickerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     apiFetch('/api/clients/')
@@ -80,7 +93,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
 
   const clientsBySlug = useMemo(() => new Map(clients.map((c) => [c.slug, c])), [clients]);
 
-  // Product counts per client — cheap to compute, used to label the client
+  // Product counts per client " cheap to compute, used to label the client
   // dropdown and to warn the user before they search a huge catalogue.
   const clientOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -102,7 +115,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
   }, [products, clients, clientsBySlug]);
 
   // Only compute + render matching products once the search is scoped enough
-  // (a client picked, or a real search term) — never dump every product.
+  // (a client picked, or a real search term) " never dump every product.
   const pickerHasScope = Boolean(pickerClientKey) || pickerSearch.trim().length >= 2;
 
   const pickerMatches = useMemo(() => {
@@ -177,12 +190,14 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
     if (!selectedProduct) {
       setImagesReady(false);
       setIsProductLoading(false);
+      setIs3DReady(false);
       setPreloadedImages({});
       setDominantColor(null);
       return;
     }
     setImagesReady(false);
     setIsProductLoading(true);
+    setIs3DReady(false);
     preloadProductImages(selectedProduct).then(({ images, dominantColor: color }) => {
       setPreloadedImages(images);
       setDominantColor(color);
@@ -435,7 +450,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
     saveState === 'saved';
 
   const saveLabel =
-    saveState === 'saving' ? 'Saving…' :
+    saveState === 'saving' ? 'Saving...' :
       saveState === 'saved' ? 'Saved' :
         'Save zones';
 
@@ -468,7 +483,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
 
       <div className="sp-zone-numrow">
         <div>
-          <label className="pm-label">Angle°</label>
+          <label className="pm-label">Angle (deg)</label>
           <input
             type="number"
             value={z.angle ?? 0}
@@ -509,7 +524,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
         <div className="pm-topbar-left">
           <div className="pm-topbar-title">
             <h1>Zone setup</h1>
-            <p>{selectedProduct ? `${selectedProduct.name} · ${zones.length} zone${zones.length !== 1 ? 's' : ''}` : 'Select a product to begin'}</p>
+            <p>{selectedProduct ? `${selectedProduct.name} - ${zones.length} zone${zones.length !== 1 ? 's' : ''}` : 'Select a product to begin'}</p>
           </div>
         </div>
         <div className="pm-topbar-right">
@@ -550,21 +565,50 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
                 </div>
               ) : (
                 <>
-                  <select
-                    className="pm-input sp-picker-client"
-                    value={pickerClientKey}
-                    onChange={(e) => setPickerClientKey(e.target.value)}
-                  >
-                    <option value="">Filter by client…</option>
-                    {clientOptions.map((c) => (
-                      <option key={c.key} value={c.key}>{c.label} ({c.count.toLocaleString()})</option>
-                    ))}
-                  </select>
+                  <div className="sp-client-dropdown" ref={dropdownRef}>
+                    <button
+                      type="button"
+                      className="sp-client-dropdown-trigger"
+                      onClick={() => setPickerDropdownOpen(o => !o)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                      <span>
+                        {pickerClientKey
+                          ? clientOptions.find(c => c.key === pickerClientKey)?.label || pickerClientKey
+                          : 'All clients'}
+                      </span>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: pickerDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}><polyline points="6 9 12 15 18 9" /></svg>
+                    </button>
+
+                    {pickerDropdownOpen && (
+                      <div className="sp-client-dropdown-menu">
+                        <button
+                          type="button"
+                          className={`sp-client-option ${!pickerClientKey ? 'active' : ''}`}
+                          onClick={() => { setPickerClientKey(''); setPickerDropdownOpen(false); }}
+                        >
+                          <span>All clients</span>
+                          <span className="sp-client-option-count">{products.length}</span>
+                        </button>
+                        {clientOptions.map((c) => (
+                          <button
+                            key={c.key}
+                            type="button"
+                            className={`sp-client-option ${pickerClientKey === c.key ? 'active' : ''}`}
+                            onClick={() => { setPickerClientKey(c.key); setPickerDropdownOpen(false); }}
+                          >
+                            <span>{c.label}</span>
+                            <span className="sp-client-option-count">{c.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   <div className="sp-picker-search">
                     <SearchIcon />
                     <input
-                      placeholder="Search products by name…"
+                      placeholder="Search products by name..."
                       value={pickerSearch}
                       onChange={(e) => setPickerSearch(e.target.value)}
                     />
@@ -653,35 +697,10 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
               </div>
             </div>
 
-            {/* 3D move mode — compact switch */}
-            {/* <div className="sp-section">
-              <div className="sp-toggle-row">
-                <div>
-                  <div className="sp-toggle-label">3D move/edit</div>
-                  <p className="pm-field-help">Select and drag zones to reposition</p>
-                </div>
-                <button
-                  type="button"
-                  className={`sp-switch ${move3DMode ? 'on' : ''}`}
-                  role="switch"
-                  aria-checked={move3DMode}
-                  onClick={() => {
-                    const next = !move3DMode;
-                    setMove3DMode(next);
-                    setSelect3DMode(false);
-                    setSelectedZoneIndex(null);
-                    if (next) showToast('Click a zone in 3D view to select it, then drag to move.');
-                  }}
-                >
-                  <span className="sp-switch-knob" />
-                </button>
-              </div>
-            </div> */}
-
             {/* Merged, filterable zone list */}
             <div className="sp-section">
               <div className="sp-zones-header">
-                <label className="pm-label">Zones — {currentSide}</label>
+                <label className="pm-label">Zones - {currentSide}</label>
                 <div className="sp-filter-row">
                   <button className={`sp-filter-chip ${zoneFilter === 'all' ? 'active' : ''}`} onClick={() => setZoneFilter('all')}>All</button>
                   <button className={`sp-filter-chip ${zoneFilter === '2d' ? 'active' : ''}`} onClick={() => setZoneFilter('2d')}>2D</button>
@@ -703,7 +722,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
               </div>
             </div>
 
-            {/* How to use — collapsed by default */}
+            {/* How to use " collapsed by default */}
             <details className="sp-howto">
               <summary>How to use</summary>
               <ol>
@@ -716,20 +735,13 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
           </div>
         </aside>
 
-        {/* ── Main viewport area ── */}
+        {/* â"€â"€ Main viewport area â"€â"€ */}
         <main className="pm-main sp-main">
           {!selectedProduct ? (
             <div className="pm-empty">
               <div className="pm-empty-icon"><ImageIcon /></div>
               <h3>No product selected</h3>
               <p>Filter by client or search by name in the sidebar to find a product.</p>
-            </div>
-          ) : isProductLoading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', color: '#64748b' }}>
-              <Loader2 size={52} style={{ animation: 'spin 1s linear infinite' }} />
-              <p style={{ fontWeight: 600, fontSize: '1.1rem', margin: 0 }}>Loading product assets…</p>
-              <p style={{ fontSize: '0.85rem', margin: 0, opacity: 0.7 }}>Preparing images and 3D model</p>
-              <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
             </div>
           ) : (
             <>
@@ -760,18 +772,17 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
 
               <div className="sp-viewports">
 
-                {/* ── 2D Image Editor Viewport ── */}
+                {/* â"€â"€ 2D Image Editor Viewport â"€â"€ */}
                 {(setupViewMode === 'both' || setupViewMode === '2d') && (
                   <div className="sp-viewport-panel">
                     <div className="sp-viewport-panel-header">
-                      <span>2D setup canvas — {currentSide.toUpperCase()}</span>
+                      <span>2D setup canvas - {currentSide.toUpperCase()}</span>
                     </div>
-                    <div className="sp-canvas-frame" style={{ position: 'relative' }}>
+                    <div className="sp-canvas-frame sp-canvas-frame-loading">
                       {!imagesReady && (
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(245,247,250,0.85)', zIndex: 20, gap: '0.75rem', color: '#64748b' }}>
-                          <Loader2 size={36} style={{ animation: 'spin 1s linear infinite' }} />
-                          <span style={{ fontWeight: 500 }}>Loading product images…</span>
-                          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                        <div className="sp-viewport-loader" role="status" aria-live="polite">
+                          <Loader2 className="sp-loader-icon" size={36} />
+                          <span>Loading product images...</span>
                         </div>
                       )}
                       <div
@@ -850,7 +861,7 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
                                 textTransform: 'uppercase',
                               }}>
                                 {z.type === 'logo' ? 'Imprint' : z.type === 'combined' ? 'Combined' : 'Text'}
-                                {z.name ? ` · ${z.name}` : ''}
+                                {z.name ? ` - ${z.name}` : ''}
                               </span>
                               {/* Delete button */}
                               <button
@@ -892,20 +903,21 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
                   </div>
                 )}
 
-                {/* ── 3D Live Preview Viewport ── */}
+                {/* â"€â"€ 3D Live Preview Viewport â"€â"€ */}
                 {(setupViewMode === 'both' || setupViewMode === '3d') && (
                   <div className="sp-viewport-panel">
                     <div className="sp-viewport-panel-header">
                       <span>3D live viewport</span>
                     </div>
-                    <div className="sp-canvas-frame sp-canvas-frame-3d" style={{ position: 'relative' }}>
-                      {!imagesReady && (
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(245,247,250,0.88)', zIndex: 20, gap: '0.75rem', color: '#64748b', borderRadius: 12 }}>
-                          <Loader2 size={40} style={{ animation: 'spin 1s linear infinite' }} />
-                          <span style={{ fontWeight: 500, fontSize: '1rem' }}>Preparing 3D model…</span>
+                    <div className="sp-canvas-frame sp-canvas-frame-3d sp-canvas-frame-loading">
+                      {(!imagesReady || !is3DReady) && (
+                        <div className="sp-viewport-loader sp-viewport-loader-3d" role="status" aria-live="polite">
+                          <Loader2 className="sp-loader-icon" size={40} />
+                          <span>{imagesReady ? 'Preparing 3D model...' : 'Loading product assets...'}</span>
                         </div>
                       )}
                       <SetupThreePreview
+                        key={selectedProduct.id}
                         product={selectedProduct}
                         zones={zones}
                         currentSide={currentSide}
@@ -918,10 +930,11 @@ export default function SetupPage({ products, showToast, onBack }: Props) {
                         zoneMode={mode}
                         onZonePlaced={handleZonePlacedFrom3D}
                         onDeleteZone={deleteZone}
+                        onReady={() => setIs3DReady(true)}
                       />
                     </div>
                     <p className="sp-viewport-hint">
-                      Drag to rotate · scroll to zoom.{' '}
+                      Drag to rotate - scroll to zoom.{' '}
                       {select3DMode ? 'Click on the 3D surface to place a zone.' : 'Zones render live on the 3D model.'}
                     </p>
                   </div>
@@ -953,26 +966,29 @@ function Spinner() { return <span className="pm-spinner" />; }
    plus setup-page-specific layout classes prefixed "sp-".
 ───────────────────────────────────────────────────────────── */
 const SP_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 .pm-root {
-  --pm-bg: #F7F8FA;
-  --pm-surface: #FFFFFF;
-  --pm-surface-alt: #F1F3F6;
-  --pm-border: #E3E6EB;
-  --pm-border-strong: #D0D5DD;
-  --pm-text: #14181F;
-  --pm-text-muted: #667085;
-  --pm-text-faint: #98A2B3;
-  --pm-accent: #0D6E63;
-  --pm-accent-hover: #0A5850;
-  --pm-accent-soft: #E6F4F1;
-  --pm-danger: #D92D20;
-  --pm-danger-soft: #FEF3F2;
-  --pm-warn: #B54708;
-  --pm-warn-soft: #FFFAEB;
-  --pm-radius: 10px;
-  --pm-radius-sm: 7px;
-  --pm-font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --pm-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --pm-bg: #f6f5fb;
+  --pm-surface: #ffffff;
+  --pm-surface-alt: #f1effb;
+  --pm-border: #e2e0ee;
+  --pm-border-strong: #cbc7df;
+  --pm-text: #111827;
+  --pm-text-muted: #6b7280;
+  --pm-text-faint: #9ca3af;
+  --pm-accent: #8175e8;
+  --pm-accent-hover: #7064d8;
+  --pm-accent-soft: #eceaff;
+  --pm-green: #059669;
+  --pm-green-soft: #ecfdf5;
+  --pm-danger: #dc2626;
+  --pm-danger-soft: #fff5f5;
+  --pm-warn: #d97706;
+  --pm-warn-soft: #fffbeb;
+  --pm-radius: 14px;
+  --pm-radius-sm: 9px;
+  --pm-font: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 
   font-family: var(--pm-font);
   color: var(--pm-text);
@@ -980,7 +996,7 @@ const SP_STYLES = `
   height: 100vh;
   max-height: 100vh;
   min-width: 90vw;
-  padding:0px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -990,181 +1006,440 @@ const SP_STYLES = `
 .pm-root button { font-family: inherit; cursor: pointer; }
 .pm-root input, .pm-root select, .pm-root textarea { font-family: inherit; }
 
-/* Topbar */
-.pm-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 28px; border-bottom: 1px solid var(--pm-border); background: var(--pm-surface); flex-shrink: 0; }
+/* â"€â"€ Topbar â"€â"€ */
+.pm-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; padding: 0 32px; height: 72px;
+  border-bottom: 1px solid var(--pm-border);
+  background: var(--pm-surface);
+  flex-shrink: 0;
+  box-shadow: 0 4px 18px rgba(51,45,90,0.05);
+}
 .pm-topbar-left { display: flex; align-items: center; gap: 14px; }
-.pm-topbar-title h1 { font-size: 1.25rem; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-.pm-topbar-title p { font-size: 0.8125rem; color: var(--pm-text-muted); margin: 2px 0 0; }
-.pm-topbar-right { display: flex; gap: 10px; }
+.pm-topbar-title h1 {
+  font-size: 1.1rem; font-weight: 700; margin: 0;
+  letter-spacing: -0.03em; color: var(--pm-text);
+}
+.pm-topbar-title p { font-size: 0.78rem; color: var(--pm-text-muted); margin: 2px 0 0; }
+.pm-topbar-right { display: flex; gap: 8px; align-items: center; }
 
-/* Buttons */
-.pm-btn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: var(--pm-radius-sm); border: 1px solid transparent; font-size: 0.8125rem; font-weight: 550; text-decoration: none; transition: background .12s, border-color .12s, color .12s; white-space: nowrap; }
-.pm-btn.sm { padding: 6px 11px; font-size: 0.75rem; }
-.pm-btn-primary { background: var(--pm-accent); color: #fff; }
-.pm-btn-primary:hover { background: var(--pm-accent-hover); }
-.pm-btn-primary:disabled { background: var(--pm-border-strong); cursor: not-allowed; }
-.pm-btn-ghost { background: var(--pm-surface); color: var(--pm-text); border-color: var(--pm-border); }
-.pm-btn-ghost:hover { background: var(--pm-surface-alt); border-color: var(--pm-border-strong); }
+/* â"€â"€ Buttons â"€â"€ */
+.pm-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: var(--pm-radius-sm);
+  border: 1.5px solid transparent;
+  font-size: 0.82rem; font-weight: 600; letter-spacing: -0.01em;
+  text-decoration: none; transition: all 0.15s ease; white-space: nowrap;
+}
+.pm-btn.sm { padding: 5px 12px; font-size: 0.75rem; }
+.pm-btn-primary { background: var(--pm-accent); color: #fff; border-color: var(--pm-accent); box-shadow: 0 1px 3px rgba(129,117,232,0.3); }
+.pm-btn-primary:hover { background: var(--pm-accent-hover); border-color: var(--pm-accent-hover); box-shadow: 0 4px 12px rgba(129,117,232,0.3); }
+.pm-btn-primary:disabled { background: #9ca3af; border-color: #9ca3af; cursor: not-allowed; box-shadow: none; }
+.pm-btn-ghost { background: var(--pm-surface); color: var(--pm-text-muted); border-color: var(--pm-border); }
+.pm-btn-ghost:hover { background: var(--pm-surface-alt); border-color: var(--pm-border-strong); color: var(--pm-text); }
 .pm-btn-ghost:disabled { color: var(--pm-text-faint); cursor: not-allowed; }
 
-.pm-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--pm-radius-sm); border: 1px solid var(--pm-border); background: var(--pm-surface); color: var(--pm-text-muted); transition: background .12s, color .12s, border-color .12s; flex-shrink: 0; }
+.pm-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: var(--pm-radius-sm);
+  border: 1.5px solid var(--pm-border); background: var(--pm-surface);
+  color: var(--pm-text-muted); transition: all 0.15s; flex-shrink: 0;
+}
 .pm-icon-btn:hover { background: var(--pm-surface-alt); color: var(--pm-text); }
-.pm-icon-btn.sm { width: 26px; height: 26px; }
-.pm-icon-btn.danger:hover { background: var(--pm-danger-soft); color: var(--pm-danger); border-color: #FDA29B; }
-.pm-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pm-icon-btn.sm { width: 26px; height: 26px; border-radius: 6px; }
+.pm-icon-btn.danger:hover { background: var(--pm-danger-soft); color: var(--pm-danger); border-color: #fca5a5; }
 
-/* Shell layout */
+/* â"€â"€ Shell layout â"€â"€ */
 .pm-shell { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
-/* Sidebar (shared shell chrome) — independently scrollable */
-.pm-sidebar { flex-shrink: 0; border-right: 1px solid var(--pm-border); background: var(--pm-surface); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.sp-sidebar { width: 280px; }
-.sp-sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
-.sp-section { margin-bottom: 18px; }
-.sp-section:last-child { margin-bottom: 0; }
+/* â"€â"€ Sidebar â"€â"€ */
+.pm-sidebar {
+  flex-shrink: 0; border-right: 1px solid var(--pm-border);
+  background: var(--pm-surface); display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden;
+}
+.sp-sidebar { width: 292px; }
+.sp-sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 18px; }
+.sp-sidebar-scroll::-webkit-scrollbar { width: 4px; }
+.sp-sidebar-scroll::-webkit-scrollbar-thumb { background: var(--pm-border-strong); border-radius: 4px; }
+
+.sp-section {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--pm-border);
+}
+.sp-section:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
 .sp-hint-inline { margin-top: 8px; }
 
-/* Main — fixed to viewport, never scrolls; canvases size to fit */
-.pm-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 18px 24px 20px; overflow: hidden; }
+/* ── Custom Client Dropdown ── */
+.sp-client-dropdown {
+  position: relative;
+  margin-bottom: 10px;
+}
+.sp-client-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--pm-surface);
+  border: 1.5px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--pm-text);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  font-family: inherit;
+}
+.sp-client-dropdown-trigger:hover {
+  border-color: var(--pm-border-strong);
+  background: var(--pm-surface-alt);
+}
+.sp-client-dropdown-trigger svg:first-child { color: var(--pm-text-muted); flex-shrink: 0; }
+.sp-client-dropdown-trigger span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sp-client-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--pm-surface);
+  border: 1.5px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  z-index: 50;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.sp-client-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  font-size: 0.82rem;
+  color: var(--pm-text);
+  cursor: pointer;
+  transition: background 0.12s;
+  font-family: inherit;
+  text-align: left;
+}
+.sp-client-option:hover { background: var(--pm-surface-alt); }
+.sp-client-option.active {
+  background: var(--pm-accent-soft);
+  color: var(--pm-accent-hover);
+  font-weight: 600;
+}
+.sp-client-option-count {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  background: var(--pm-surface-alt);
+  border-radius: 20px;
+  color: var(--pm-text-muted);
+  margin-left: 8px;
+}
+.sp-client-option.active .sp-client-option-count {
+  background: rgba(129,117,232,0.15);
+  color: var(--pm-accent-hover);
+}
+
+/* â"€â"€ Main content â"€â"€ */
+.pm-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 20px 24px; overflow: hidden; background: var(--pm-bg); }
 .sp-main { gap: 14px; }
 
-/* Fields / inputs (shared) */
+/* â"€â"€ Form fields â"€â"€ */
 .pm-field { margin-bottom: 0; }
 .sp-zone-field { margin-bottom: 10px; }
-.pm-label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--pm-text); margin-bottom: 6px; }
-.pm-field-help { font-size: 0.75rem; color: var(--pm-text-muted); margin: 0; line-height: 1.4; }
-.pm-input { width: 100%; padding: 9px 11px; border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); font-size: 0.8125rem; color: var(--pm-text); background: var(--pm-surface); outline: none; transition: border-color .12s, box-shadow .12s; }
-.pm-input:focus { border-color: var(--pm-accent); box-shadow: 0 0 0 3px var(--pm-accent-soft); }
+.pm-label {
+  display: block; font-size: 0.72rem; font-weight: 700;
+  color: var(--pm-text-muted); margin-bottom: 7px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.pm-field-help { font-size: 0.75rem; color: var(--pm-text-faint); margin: 0; line-height: 1.45; }
+.pm-input {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid var(--pm-border); border-radius: var(--pm-radius-sm);
+  font-size: 0.82rem; color: var(--pm-text);
+  background: var(--pm-surface); outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pm-input:focus { border-color: var(--pm-accent); box-shadow: 0 0 0 3px rgba(129,117,232,0.1); }
 .pm-input-xs { padding: 6px 9px; font-size: 0.75rem; }
 
-/* Tags (shared) */
-.pm-tag { font-size: 0.6875rem; font-weight: 550; padding: 2px 8px; border-radius: 20px; background: var(--pm-surface-alt); color: var(--pm-text-muted); flex-shrink: 0; }
+/* Tags */
+.pm-tag {
+  font-size: 0.68rem; font-weight: 600; padding: 2px 8px;
+  border-radius: 20px; background: var(--pm-surface-alt);
+  color: var(--pm-text-muted); flex-shrink: 0;
+}
 .pm-tag-accent { background: var(--pm-accent-soft); color: var(--pm-accent-hover); }
 
-/* Empty state (shared) */
-.pm-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; flex: 1; min-height: 0; padding: 72px 20px; text-align: center; background: var(--pm-surface); border: 1px dashed var(--pm-border-strong); border-radius: var(--pm-radius); }
-.pm-empty-icon { color: var(--pm-text-faint); margin-bottom: 4px; }
-.pm-empty h3 { margin: 0; font-size: 0.9375rem; }
-.pm-empty p { margin: 0; font-size: 0.8125rem; color: var(--pm-text-muted); max-width: 320px; }
+/* Empty state */
+.pm-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; flex: 1; min-height: 0;
+  padding: 72px 20px; text-align: center;
+  background: var(--pm-surface); border: 2px dashed var(--pm-border);
+  border-radius: var(--pm-radius);
+}
+.pm-empty-icon { color: var(--pm-text-faint); margin-bottom: 6px; }
+.pm-empty h3 { margin: 0; font-size: 1rem; font-weight: 700; color: var(--pm-text); }
+.pm-empty p { margin: 4px 0 0; font-size: 0.82rem; color: var(--pm-text-muted); max-width: 320px; line-height: 1.55; }
 
-/* View toggle (shared) */
-.pm-view-toggle { display: flex; border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); overflow: hidden; flex-shrink: 0; }
-.pm-view-toggle button { display: flex; align-items: center; justify-content: center; padding: 0 14px; height: 34px; background: var(--pm-surface); color: var(--pm-text-faint); border: none; border-left: 1px solid var(--pm-border); font-size: 0.75rem; font-weight: 600; }
+/* View toggle */
+.pm-view-toggle {
+  display: flex; border: 1.5px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm); overflow: hidden; flex-shrink: 0;
+}
+.pm-view-toggle button {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 14px; height: 34px; background: var(--pm-surface);
+  color: var(--pm-text-faint); border: none;
+  border-left: 1.5px solid var(--pm-border); font-size: 0.75rem; font-weight: 700;
+}
 .pm-view-toggle button:first-child { border-left: none; }
 .pm-view-toggle button.active { background: var(--pm-accent-soft); color: var(--pm-accent-hover); }
 
-/* Spinner (shared) */
-.pm-spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: pm-spin .6s linear infinite; }
+/* Spinner */
+.pm-spinner {
+  display: inline-block; width: 13px; height: 13px;
+  border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+  border-radius: 50%; animation: pm-spin .6s linear infinite;
+}
 @keyframes pm-spin { to { transform: rotate(360deg); } }
 
-/* ── Setup-page-specific ── */
-
-/* Product picker */
-.sp-picker-client { margin-bottom: 8px; }
-.sp-picker-search { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--pm-surface); border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); color: var(--pm-text-faint); margin-bottom: 8px; }
-.sp-picker-search:focus-within { border-color: var(--pm-accent); box-shadow: 0 0 0 3px var(--pm-accent-soft); color: var(--pm-text-muted); }
+/* â"€â"€ Product picker â"€â"€ */
+.sp-picker-client { margin-bottom: 10px; }
+.sp-picker-search {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--pm-surface-alt); border: 1.5px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm); color: var(--pm-text-faint); margin-bottom: 8px;
+}
+.sp-picker-search:focus-within {
+  border-color: var(--pm-accent); box-shadow: 0 0 0 3px rgba(129,117,232,0.1);
+  background: var(--pm-surface); color: var(--pm-text-muted);
+}
 .sp-picker-search svg { flex-shrink: 0; }
-.sp-picker-search input { flex: 1; border: none; outline: none; background: transparent; font-size: 0.8125rem; color: var(--pm-text); min-width: 0; }
+.sp-picker-search input { flex: 1; border: none; outline: none; background: transparent; font-size: 0.82rem; color: var(--pm-text); min-width: 0; }
 .sp-picker-search input::placeholder { color: var(--pm-text-faint); }
 .pm-search-clear { display: flex; color: var(--pm-text-faint); border: none; background: none; padding: 2px; flex-shrink: 0; }
 .pm-search-clear:hover { color: var(--pm-text); }
 
-.sp-result-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); }
-.sp-result-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 10px; border: none; border-bottom: 1px solid var(--pm-surface-alt); background: var(--pm-surface); text-align: left; font-size: 0.8125rem; color: var(--pm-text); }
+.sp-result-list {
+  max-height: 260px; overflow-y: auto;
+  border: 1.5px solid var(--pm-border); border-radius: var(--pm-radius-sm);
+  background: var(--pm-surface);
+}
+.sp-result-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 9px 12px; border: none;
+  border-bottom: 1px solid var(--pm-surface-alt); background: var(--pm-surface);
+  text-align: left; font-size: 0.82rem; color: var(--pm-text);
+  transition: background 0.1s;
+}
 .sp-result-item:last-child { border-bottom: none; }
 .sp-result-item:hover { background: var(--pm-accent-soft); color: var(--pm-accent-hover); }
-.sp-result-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sp-result-client { flex-shrink: 0; font-size: 0.6875rem; color: var(--pm-text-faint); }
-.sp-result-truncated { margin: 0; padding: 7px 10px; font-size: 0.6875rem; color: var(--pm-text-faint); text-align: center; background: var(--pm-surface-alt); }
+.sp-result-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.sp-result-client { flex-shrink: 0; font-size: 0.68rem; color: var(--pm-text-faint); }
+.sp-result-truncated {
+  margin: 0; padding: 8px 12px; font-size: 0.7rem; color: var(--pm-text-faint);
+  text-align: center; background: var(--pm-surface-alt);
+}
 
-.sp-selected-chip { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--pm-accent); background: var(--pm-accent-soft); border-radius: var(--pm-radius-sm); }
+.sp-selected-chip {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px; border: 1.5px solid var(--pm-accent);
+  background: var(--pm-accent-soft); border-radius: var(--pm-radius-sm);
+}
 .sp-selected-chip-info { min-width: 0; }
-.sp-selected-chip-name { font-size: 0.8125rem; font-weight: 650; color: var(--pm-accent-hover); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sp-selected-chip-client { font-size: 0.6875rem; color: var(--pm-text-muted); margin-top: 1px; }
+.sp-selected-chip-name { font-size: 0.85rem; font-weight: 700; color: var(--pm-accent-hover); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-selected-chip-client { font-size: 0.7rem; color: var(--pm-text-muted); margin-top: 2px; }
 
-/* Compact mode chips */
+/* Zone mode chips */
 .sp-mode-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.sp-mode-chip-sm { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px; border-radius: var(--pm-radius-sm); border: 1px solid var(--pm-border); background: var(--pm-surface); font-size: 0.6875rem; font-weight: 600; color: var(--pm-text-muted); }
-.sp-mode-chip-sm:hover { border-color: var(--pm-border-strong); }
+.sp-mode-chip-sm {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 4px; border-radius: var(--pm-radius-sm);
+  border: 1.5px solid var(--pm-border); background: var(--pm-surface);
+  font-size: 0.72rem; font-weight: 700; color: var(--pm-text-muted);
+  transition: all 0.15s;
+}
+.sp-mode-chip-sm:hover { border-color: var(--pm-border-strong); background: var(--pm-surface-alt); }
 .sp-mode-chip-sm.active { border-color: var(--pm-accent); background: var(--pm-accent-soft); color: var(--pm-accent-hover); }
 
-/* Zone type dots */
-.sp-zone-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-.sp-zone-dot.logo { background: #0D6E63; }
-.sp-zone-dot.text { background: #2563EB; }
-.sp-zone-dot.combined { background: #7C3AED; }
+/* Zone dots */
+.sp-zone-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.sp-zone-dot.logo { background: var(--pm-accent); }
+.sp-zone-dot.text { background: var(--pm-green); }
+.sp-zone-dot.combined { background: #a58cf2; }
 
-/* 3D toggle switch */
+/* 3D Toggle switch */
 .sp-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.sp-toggle-label { font-size: 0.8125rem; font-weight: 600; margin-bottom: 2px; }
-.sp-switch { position: relative; width: 36px; height: 21px; border-radius: 20px; background: var(--pm-border-strong); border: none; flex-shrink: 0; transition: background .15s; }
+.sp-toggle-label { font-size: 0.85rem; font-weight: 700; margin-bottom: 2px; color: var(--pm-text); }
+.sp-switch {
+  position: relative; width: 40px; height: 23px; border-radius: 20px;
+  background: var(--pm-border-strong); border: none; flex-shrink: 0; transition: background .15s;
+}
 .sp-switch.on { background: var(--pm-accent); }
-.sp-switch-knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,0.25); transition: transform .15s; }
-.sp-switch.on .sp-switch-knob { transform: translateX(15px); }
+.sp-switch-knob {
+  position: absolute; top: 3px; left: 3px; width: 17px; height: 17px;
+  border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2); transition: transform .15s;
+}
+.sp-switch.on .sp-switch-knob { transform: translateX(17px); }
 
-/* Zone list header + filter */
-.sp-zones-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+/* Zone list + filter */
+.sp-zones-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .sp-zones-header .pm-label { margin-bottom: 0; }
-.sp-filter-row { display: flex; gap: 3px; background: var(--pm-surface-alt); border-radius: 20px; padding: 2px; }
-.sp-filter-chip { padding: 3px 9px; border-radius: 16px; border: none; background: transparent; font-size: 0.6875rem; font-weight: 600; color: var(--pm-text-faint); }
-.sp-filter-chip.active { background: var(--pm-surface); color: var(--pm-accent-hover); box-shadow: 0 1px 2px rgba(16,24,40,0.08); }
+.sp-filter-row { display: flex; gap: 2px; background: var(--pm-surface-alt); border-radius: 20px; padding: 2px; }
+.sp-filter-chip {
+  padding: 3px 10px; border-radius: 16px; border: none;
+  background: transparent; font-size: 0.7rem; font-weight: 700; color: var(--pm-text-faint);
+  transition: all 0.12s;
+}
+.sp-filter-chip.active { background: var(--pm-surface); color: var(--pm-accent-hover); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
-/* Zone lists / cards */
-.sp-zone-list { display: flex; flex-direction: column; gap: 10px; }
-.sp-zone-empty { font-size: 0.75rem; color: var(--pm-text-faint); line-height: 1.5; margin: 0; padding: 10px; background: var(--pm-surface-alt); border-radius: var(--pm-radius-sm); border: 1px dashed var(--pm-border-strong); }
-.sp-zone-card { border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); padding: 10px; background: var(--pm-surface); }
+/* Zone cards */
+.sp-zone-list { display: flex; flex-direction: column; gap: 8px; }
+.sp-zone-empty {
+  font-size: 0.77rem; color: var(--pm-text-faint); line-height: 1.5; margin: 0;
+  padding: 12px 14px; background: var(--pm-surface-alt); border-radius: var(--pm-radius-sm);
+  border: 1.5px dashed var(--pm-border-strong); text-align: center;
+}
+.sp-zone-card {
+  border: 1.5px solid var(--pm-border); border-radius: var(--pm-radius-sm);
+  padding: 12px; background: var(--pm-surface);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.sp-zone-card:hover { border-color: var(--pm-border-strong); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 .sp-zone-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.sp-zone-title { font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-zone-title { font-size: 0.82rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .sp-zone-sliders { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-.sp-slider-row label { display: flex; justify-content: space-between; font-size: 0.6875rem; font-weight: 600; color: var(--pm-text-muted); margin-bottom: 3px; }
-.sp-slider-row label span { color: var(--pm-text-faint); font-weight: 500; }
-.sp-range { width: 100%; height: 4px; -webkit-appearance: none; appearance: none; background: var(--pm-border-strong); border-radius: 4px; outline: none; }
-.sp-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--pm-accent); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--pm-border-strong); cursor: pointer; }
-.sp-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--pm-accent); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--pm-border-strong); cursor: pointer; }
 .sp-zone-numrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.sp-zone-numrow .pm-label { font-size: 0.6875rem; margin-bottom: 3px; }
+.sp-zone-numrow .pm-label { font-size: 0.68rem; margin-bottom: 3px; }
 
-/* How-to — native collapsible, closed by default */
-.sp-howto { background: var(--pm-surface-alt); border: 1px solid var(--pm-border); border-radius: var(--pm-radius-sm); padding: 10px 14px; font-size: 0.75rem; color: var(--pm-text-muted); line-height: 1.5; }
-.sp-howto summary { cursor: pointer; font-weight: 600; color: var(--pm-text); font-size: 0.75rem; list-style: none; }
+/* How-to */
+.sp-howto {
+  background: var(--pm-surface-alt); border: 1.5px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm); padding: 12px 16px;
+  font-size: 0.77rem; color: var(--pm-text-muted); line-height: 1.5;
+}
+.sp-howto summary { cursor: pointer; font-weight: 700; color: var(--pm-text); font-size: 0.78rem; list-style: none; }
 .sp-howto summary::-webkit-details-marker { display: none; }
-.sp-howto summary::before { content: '›'; display: inline-block; margin-right: 6px; transition: transform .15s; font-weight: 700; }
+.sp-howto summary::before { content: '>'; display: inline-block; margin-right: 6px; transition: transform .15s; font-weight: 800; }
 .sp-howto[open] summary::before { transform: rotate(90deg); }
-.sp-howto ol { margin: 8px 0 0; padding-left: 18px; }
-.sp-howto li { margin-bottom: 2px; }
+.sp-howto ol { margin: 10px 0 0; padding-left: 18px; }
+.sp-howto li { margin-bottom: 4px; }
 
-/* Main header row: side tabs + view toggle */
+/* Side tabs + viewport header */
 .sp-main-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; flex-shrink: 0; }
 .sp-side-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-.sp-side-tab { position: relative; padding: 7px 14px; border-radius: 20px; border: 1px solid var(--pm-border); background: var(--pm-surface); font-size: 0.8125rem; font-weight: 550; color: var(--pm-text-muted); }
-.sp-side-tab:hover { border-color: var(--pm-border-strong); }
-.sp-side-tab.active { background: var(--pm-accent); border-color: var(--pm-accent); color: #fff; }
-.sp-side-tab-dot { position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: #F79009; box-shadow: 0 0 0 1.5px var(--pm-surface); }
+.sp-side-tab {
+  position: relative; padding: 6px 16px; border-radius: 20px;
+  border: 1.5px solid var(--pm-border); background: var(--pm-surface);
+  font-size: 0.78rem; font-weight: 700; color: var(--pm-text-muted);
+  transition: all 0.15s;
+}
+.sp-side-tab:hover { border-color: var(--pm-border-strong); color: var(--pm-text); background: var(--pm-surface-alt); }
+.sp-side-tab.active { background: var(--pm-accent); border-color: var(--pm-accent); color: #fff; box-shadow: 0 2px 8px rgba(129,117,232,0.3); }
+.sp-side-tab-dot {
+  position: absolute; top: 4px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 1.5px var(--pm-surface);
+}
 .sp-side-tab.active .sp-side-tab-dot { background: #fff; box-shadow: 0 0 0 1.5px var(--pm-accent); }
 
-/* Viewports — fill remaining space, never trigger page scroll */
+/* Viewports */
 .sp-viewports { display: flex; gap: 14px; flex: 1; min-height: 0; }
-.sp-viewport-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--pm-surface); border: 1px solid var(--pm-border); border-radius: var(--pm-radius); overflow: hidden; }
-.sp-viewport-panel-header { padding: 8px 14px; border-bottom: 1px solid var(--pm-border); font-size: 0.75rem; font-weight: 650; color: var(--pm-text); background: var(--pm-surface-alt); flex-shrink: 0; }
-.sp-canvas-frame { flex: 1; min-height: 0; background: #ffffffff; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
+.sp-viewport-panel {
+  flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--pm-surface); border: 1.5px solid var(--pm-border);
+  border-radius: var(--pm-radius); overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.sp-viewport-panel-header {
+  padding: 10px 16px; border-bottom: 1px solid var(--pm-border);
+  font-size: 0.74rem; font-weight: 700; color: var(--pm-text-muted);
+  background: var(--pm-surface-alt); flex-shrink: 0;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sp-canvas-frame {
+  flex: 1; min-height: 0; background: #fdfdfd;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; overflow: hidden; position: relative;
+}
 .sp-canvas-frame-3d { padding: 0; position: relative; }
-.sp-canvas { position: relative; height: 100%; width: auto; max-width: 100%; max-height: 100%; aspect-ratio: 1 / 1; user-select: none; cursor: crosshair; background: #ffffff; border-radius: 8px; overflow: hidden; }
-.sp-canvas-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #667085; font-size: 0.8125rem; }
-.sp-canvas-zone-label { background: rgba(0,0,0,0.85); color: #fff; font-size: 0.65rem; padding: 2px 4px; border-radius: 3px; line-height: 1.2; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; z-index: 1; }
-.sp-canvas-zone-dim { background: rgba(0,0,0,0.85); color: #4CD9C0; font-size: 0.6rem; padding: 1px 3px; border-radius: 3px; align-self: flex-end; font-weight: 600; }
-.sp-viewport-hint { margin: 0; padding: 7px 14px; font-size: 0.75rem; color: var(--pm-text-muted); border-top: 1px solid var(--pm-border); background: var(--pm-surface); flex-shrink: 0; }
+.sp-canvas-frame-loading { position: relative; }
+.sp-viewport-loader {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: var(--pm-text-muted); background: rgba(248,249,251,0.9);
+  font-size: 0.82rem; font-weight: 500;
+}
+.sp-viewport-loader-3d { border-radius: 12px; }
+.sp-loader-icon { animation: sp-loader-spin 0.9s linear infinite; color: var(--pm-accent); }
+@keyframes sp-loader-spin { to { transform: rotate(360deg); } }
+.sp-canvas {
+  position: relative; height: 100%; width: auto; max-width: 100%; max-height: 100%;
+  aspect-ratio: 1 / 1; user-select: none; cursor: crosshair;
+  background: #ffffff; border-radius: 10px; overflow: hidden;
+  // box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+.sp-canvas-empty {
+  width: 100%; height: 100%; display: flex; align-items: center;
+  justify-content: center; color: var(--pm-text-faint); font-size: 0.82rem;
+}
+.sp-canvas-zone-label {
+  background: rgba(129,117,232,0.85); color: #fff; font-size: 0.65rem;
+  padding: 2px 5px; border-radius: 4px; line-height: 1.2;
+  max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; z-index: 1;
+}
+.sp-canvas-zone-dim {
+  background: rgba(0,0,0,0.7); color: #a5f3fc; font-size: 0.6rem;
+  padding: 1px 4px; border-radius: 3px; align-self: flex-end; font-weight: 700;
+}
+.sp-viewport-hint {
+  margin: 0; padding: 8px 16px; font-size: 0.74rem; color: var(--pm-text-muted);
+  border-top: 1px solid var(--pm-border); background: var(--pm-surface); flex-shrink: 0;
+}
 
 /* Responsive */
 @media (max-width: 900px) {
   .pm-root { height: auto; min-height: 100vh; overflow: visible; }
   .pm-shell { flex-direction: column; overflow: visible; }
-  .sp-sidebar { width: 100%; max-height: 320px; border-right: none; border-bottom: 1px solid var(--pm-border); }
+  .sp-sidebar { width: 100%; max-height: 340px; border-right: none; border-bottom: 1px solid var(--pm-border); }
   .pm-main { overflow: visible; }
   .sp-viewports { flex-direction: column; }
   .sp-canvas-frame { min-height: 380px; }
 }
 @media (max-width: 640px) {
-  .pm-topbar { padding: 16px; flex-wrap: wrap; }
-  .pm-main { padding: 16px; }
+  .pm-topbar { padding: 0 16px; flex-wrap: wrap; height: auto; padding: 14px 16px; }
+  .pm-main { padding: 14px; }
+}
+
+/* Shared landing-page rhythm and finish. */
+.sp-main { padding: 28px 32px 32px; gap: 20px; background: #f6f5fb; }
+.sp-main-header { min-height: 38px; }
+.sp-side-tabs { gap: 7px; }
+.sp-side-tab { padding: 8px 16px; }
+.sp-view-toggle { box-shadow: 0 2px 8px rgba(51,45,90,.05); }
+.sp-viewports { gap: 18px; }
+.sp-viewport-panel { box-shadow: 0 8px 24px rgba(51,45,90,.06); }
+.sp-viewport-panel-header { padding: 12px 18px; color: #4f5d70; background: #f1effb; }
+.sp-viewport-hint { padding: 10px 18px; }
+.sp-selected-chip { box-shadow: 0 6px 16px rgba(51,45,90,.06); }
+.sp-zone-card { box-shadow: 0 4px 12px rgba(51,45,90,.04); }
+.sp-zone-card:hover { box-shadow: 0 8px 18px rgba(51,45,90,.08); }
+.sp-filter-chip.active { color: var(--pm-accent-hover); }
+.sp-canvas-frame { background: #fbfbfd; }
+
+@media (max-width: 900px) {
+  .sp-main { padding: 20px; }
 }
 `;

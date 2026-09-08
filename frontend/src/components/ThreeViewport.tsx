@@ -188,7 +188,7 @@ export default function ThreeViewport({
       },
     };
 
-    if (product.model_3d_url || product.tripo_model_url) {
+    if (product.model_3d_url || (product as any).model_3d || product.tripo_model_url) {
       loadGLTFModel({
         ...opts,
         cylinderCanvas,
