@@ -10,7 +10,18 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.exceptions import AuthenticationFailed
 from .models import Product, ProductColor, ProductFamily, DesignZone, Client, DesignSubmission
+
+def get_user_from_jwt(request):
+    try:
+        auth_tuple = JWTAuthentication().authenticate(request)
+        if auth_tuple:
+            return auth_tuple[0]
+    except AuthenticationFailed:
+        pass
+    return None
 
 
 def serialize_product_colors(product):
@@ -103,6 +114,11 @@ def save_zones(request):
         zones = data.get('zones', [])
 
         product = get_object_or_404(Product, pk=product_id)
+        if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+            profile = getattr(request.user, 'profile', None)
+            if not profile or not profile.client or product.client != profile.client:
+                return JsonResponse({'error': 'Unauthorized to modify this product'}, status=403)
+
         # Family-linked variants share one zone set; product zones remain an
         # explicit override for exceptional variants.
         zone_owner = product.family if product.family else product
@@ -198,8 +214,17 @@ def api_products(request):
         'available_imprint_methods', 'material__compatible_methods'
     )
     
-    # SaaS: Filter by client slug if provided
+    # Check if a user is authenticated via JWT to enforce permissions
+    user = get_user_from_jwt(request)
     client_slug = request.GET.get('client', None)
+
+    if user and not user.is_superuser:
+        profile = getattr(user, 'profile', None)
+        if profile and profile.client:
+            # Force the client_slug to the user's own client
+            client_slug = profile.client.slug
+
+    # SaaS: Filter by client slug if provided or enforced
     if client_slug:
         products_qs = products_qs.filter(client__slug=client_slug)
     
@@ -247,6 +272,12 @@ def api_products(request):
 @require_GET
 def api_clients(request):
     """API: Return list of active clients for admin selection."""
+    profile = getattr(request, 'user', None) and getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+    
+    if not is_global_admin:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+        
     clients_qs = Client.objects.filter(is_active=True)
     clients = [{
         'id': c.id,
@@ -261,6 +292,12 @@ def api_clients(request):
 
 @csrf_exempt
 def create_client(request):
+    profile = getattr(request, 'user', None) and getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+    
+    if not is_global_admin:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
@@ -269,6 +306,7 @@ def create_client(request):
         slug = request.POST.get('slug', '').strip() or slugify(name)
         primary_color = request.POST.get('primary_color', '#6c63ff').strip() or '#6c63ff'
         is_active = request.POST.get('is_active', 'true').lower() in ('true', '1', 'yes')
+        email = request.POST.get('email', '').strip()
 
         if not name:
             return JsonResponse({'error': 'Client name is required.'}, status=400)
@@ -277,6 +315,66 @@ def create_client(request):
             return JsonResponse({'error': 'Client slug already exists.'}, status=400)
 
         client = Client.objects.create(name=name, slug=slug, primary_color=primary_color, is_active=is_active)
+        
+        email_sent = False
+        user_created = False
+        
+        if email:
+            from django.contrib.auth.models import User
+            from .models import UserProfile
+            from .views_auth import generate_random_password
+            from django.core.mail import send_mail
+            from django.conf import settings
+            
+            # Check if user already exists
+            if not User.objects.filter(email=email).exists():
+                temp_password = generate_random_password()
+                username = f"admin_{slug}" 
+                if User.objects.filter(username=username).exists():
+                    import uuid
+                    username = f"admin_{slug}_{str(uuid.uuid4())[:4]}"
+                    
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=temp_password,
+                    is_staff=True
+                )
+                
+                profile, _ = UserProfile.objects.get_or_create(user=user)
+                profile.client = client
+                profile.role = 'client_admin'
+                profile.save()
+                user_created = True
+                
+                # Send email
+                subject = f"Welcome to Neura 3D - Your {name} Admin Credentials"
+                message = f"""Hello,
+
+An account for {name} has been created on the Neura 3D Dashboard.
+Here are your administrative login details:
+
+Username: {username}
+Temporary Password: {temp_password}
+
+Please log in and remember to keep this password secure.
+
+Best regards,
+The Neura 3D Team
+"""
+                try:
+                    if settings.EMAIL_HOST_USER and settings.EMAIL_HOST_PASSWORD:
+                        send_mail(
+                            subject,
+                            message,
+                            settings.EMAIL_HOST_USER,
+                            [email],
+                            fail_silently=False,
+                        )
+                        email_sent = True
+                except Exception as e:
+                    print(f"Failed to send email to client admin: {e}")
+
         return JsonResponse({
             'success': True,
             'id': client.id,
@@ -285,6 +383,8 @@ def create_client(request):
             'primary_color': client.primary_color,
             'logo_url': client.logo.url if client.logo else None,
             'is_active': client.is_active,
+            'user_created': user_created,
+            'email_sent': email_sent
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
@@ -292,6 +392,12 @@ def create_client(request):
 
 @csrf_exempt
 def update_client(request, pk):
+    profile = getattr(request, 'user', None) and getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+    
+    if not is_global_admin:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+
     if request.method not in ('POST', 'PUT', 'PATCH'):
         return JsonResponse({'error': 'POST/PUT/PATCH required'}, status=405)
 
@@ -329,6 +435,12 @@ def update_client(request, pk):
 
 @csrf_exempt
 def delete_client(request, pk):
+    profile = getattr(request, 'user', None) and getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+    
+    if not is_global_admin:
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+        
     if request.method != 'DELETE':
         body_method = ''
         try:
@@ -405,10 +517,19 @@ def create_product(request):
             return JsonResponse({'error': 'Product name is required'}, status=400)
 
         p = Product(name=name, shape_type=shape_type, is_active=True)
-        if client_slug:
-            client = Client.objects.filter(slug=client_slug, is_active=True).first()
-            if client:
-                p.client = client
+        
+        # Enforce client ownership for Client Admins
+        if hasattr(request, 'user') and not request.user.is_superuser:
+            profile = getattr(request.user, 'profile', None)
+            if profile and profile.client:
+                p.client = profile.client
+            else:
+                return JsonResponse({'error': 'You must belong to a client to create products.'}, status=403)
+        else:
+            if client_slug:
+                client = Client.objects.filter(slug=client_slug, is_active=True).first()
+                if client:
+                    p.client = client
 
         parent_product_id = request.POST.get('parent_product_id', '').strip()
         parent_product = Product.objects.filter(pk=parent_product_id).first() if parent_product_id else None
@@ -608,6 +729,12 @@ def update_product(request, pk):
         return JsonResponse({'error': 'POST/PUT required'}, status=405)
     try:
         p = get_object_or_404(Product, pk=pk)
+        
+        # Enforce client ownership
+        if hasattr(request, 'user') and not request.user.is_superuser:
+            profile = getattr(request.user, 'profile', None)
+            if not profile or not profile.client or p.client != profile.client:
+                return JsonResponse({'error': 'Unauthorized to modify this product.'}, status=403)
 
         name = request.POST.get('name', '').strip()
         if name:
@@ -615,11 +742,13 @@ def update_product(request, pk):
         shape_type = request.POST.get('shape_type', '').strip()
         if shape_type:
             p.shape_type = shape_type
-        client_slug = request.POST.get('client_slug', '').strip()
-        if client_slug:
-            client = Client.objects.filter(slug=client_slug, is_active=True).first()
-            if client:
-                p.client = client
+            
+        if hasattr(request, 'user') and getattr(request.user, 'is_superuser', False):
+            client_slug = request.POST.get('client_slug', '').strip()
+            if client_slug:
+                client = Client.objects.filter(slug=client_slug, is_active=True).first()
+                if client:
+                    p.client = client
         family_key = request.POST.get('family_key', '').strip()
         if family_key:
             family, _ = ProductFamily.objects.get_or_create(
@@ -828,6 +957,12 @@ def delete_product(request, pk):
             return JsonResponse({'error': 'DELETE required'}, status=405)
     try:
         p = get_object_or_404(Product, pk=pk)
+        
+        if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+            profile = getattr(request.user, 'profile', None)
+            if not profile or not profile.client or p.client != profile.client:
+                return JsonResponse({'error': 'Unauthorized to delete this product.'}, status=403)
+                
         p.delete()
         return JsonResponse({'success': True})
     except Exception as e:
@@ -870,6 +1005,11 @@ def reset_tripo_status(request, pk):
     """
     try:
         p = get_object_or_404(Product, pk=pk)
+        if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+            profile = getattr(request.user, 'profile', None)
+            if not profile or not profile.client or p.client != profile.client:
+                return JsonResponse({'error': 'Unauthorized'}, status=403)
+                
         p.tripo_status = ''
         p.tripo_job_id = ''
         p.tripo_model_url = ''
@@ -888,7 +1028,11 @@ def generate_product_3d(request, pk):
     try:
         from customizer.services.tripo import TripoService
         p = get_object_or_404(Product, pk=pk)
-        
+        if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+            profile = getattr(request.user, 'profile', None)
+            if not profile or not profile.client or p.client != profile.client:
+                return JsonResponse({'error': 'Unauthorized'}, status=403)
+                
         # Get texture quality from request (default: standard)
         texture_quality = request.POST.get('texture_quality', 'standard')
         
@@ -1494,6 +1638,12 @@ def create_design_submission(request):
 @require_GET
 def list_product_submissions(request, pk):
     """Admin: List all design submissions for a given product."""
+    p = get_object_or_404(Product, pk=pk)
+    if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+        profile = getattr(request.user, 'profile', None)
+        if not profile or not profile.client or p.client != profile.client:
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
+            
     submissions = DesignSubmission.objects.filter(product_id=pk).order_by('-created_at')
     data = []
     for s in submissions:
@@ -1518,6 +1668,12 @@ def download_submission_pdf(request, pk):
     """Admin-only: Serve a stored base64 PDF data URL as a downloadable PDF file."""
     import base64
     submission = get_object_or_404(DesignSubmission, pk=pk)
+    
+    if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+        profile = getattr(request.user, 'profile', None)
+        if not profile or not profile.client or submission.client != profile.client:
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
+            
     if not submission.pdf_spec_sheet_url:
         return JsonResponse({'error': 'No PDF available for this submission.'}, status=404)
 
@@ -1566,7 +1722,15 @@ from django.http import HttpResponse
 def bulk_embed_export(request):
     """API: Export embed tokens as CSV. Optional ?client=slug filter."""
     products_qs = Product.objects.filter(is_active=True).select_related('client')
-    client_slug = request.GET.get('client')
+    
+    if hasattr(request, 'user') and not getattr(request.user, 'is_superuser', False):
+        profile = getattr(request.user, 'profile', None)
+        if not profile or not profile.client:
+            return HttpResponse('Unauthorized', status=403)
+        client_slug = profile.client.slug
+    else:
+        client_slug = request.GET.get('client')
+        
     if client_slug:
         products_qs = products_qs.filter(client__slug=client_slug)
     

@@ -17,11 +17,24 @@ def generate_random_password(length=12):
 def get_me(request):
     """Return the currently authenticated user's profile info"""
     u = request.user
+    client_slug = None
+    client_name = None
+    if not u.is_superuser:
+        try:
+            profile = getattr(u, 'profile', None)
+            if profile and profile.client:
+                client_slug = profile.client.slug
+                client_name = profile.client.name
+        except Exception:
+            pass
+            
     return JsonResponse({
         "id": u.id,
         "username": u.username,
         "email": u.email,
-        "is_superuser": u.is_superuser
+        "is_superuser": u.is_superuser or (u.is_staff and not client_slug),
+        "client_slug": client_slug,
+        "client_name": client_name,
     })
 
 @api_view(['POST'])
@@ -53,17 +66,40 @@ def update_me(request):
 @permission_classes([IsAdminUser])
 def get_members(request):
     """Return all staff members"""
-    users = User.objects.filter(is_staff=True).exclude(pk=request.user.pk)
-    data = [
-        {"id": u.id, "username": u.username, "email": u.email, "is_superuser": u.is_superuser}
-        for u in users
-    ]
+    profile = getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+
+    if not is_global_admin:
+        if not profile or not profile.client:
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
+        users = User.objects.filter(is_staff=True, profile__client=profile.client).exclude(pk=request.user.pk).select_related('profile__client')
+    else:
+        users = User.objects.filter(is_staff=True).exclude(pk=request.user.pk).select_related('profile__client')
+    data = []
+    for u in users:
+        client_name = None
+        if hasattr(u, 'profile') and u.profile.client:
+            client_name = u.profile.client.name
+            
+        data.append({
+            "id": u.id, 
+            "username": u.username, 
+            "email": u.email, 
+            "is_superuser": u.is_superuser,
+            "client_name": client_name
+        })
     return JsonResponse(data, safe=False)
 
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def add_member(request):
     """Add a new staff member and email them the temporary password"""
+    profile = getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+    
+    if not is_global_admin:
+        if not profile or not profile.client:
+            return JsonResponse({'error': 'Unauthorized'}, status=403)
     email = request.data.get('email', '').strip()
     username = request.data.get('username', '').strip()
 
@@ -75,6 +111,12 @@ def add_member(request):
     if User.objects.filter(email=email).exists():
         return JsonResponse({'error': 'Email already exists'}, status=400)
 
+    client_id = request.data.get('client_id')
+    
+    # If not a global admin, force the new user to belong to their client
+    if not is_global_admin:
+        client_id = profile.client.id
+    
     # Generate temp password
     temp_password = generate_random_password()
 
@@ -85,6 +127,21 @@ def add_member(request):
         password=temp_password,
         is_staff=True  # They get staff access
     )
+    
+    # Set User Profile
+    from .models import UserProfile, Client
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    if client_id:
+        try:
+            client = Client.objects.get(pk=client_id)
+            profile.client = client
+            profile.role = 'end_user' if not request.user.is_superuser else 'client_admin' 
+            # Note: giving them end_user or client_admin doesn't matter too much currently as both allow staff access
+            # But let's standardize to client_admin if created by client_admin for simplicity, since they are managing things.
+            profile.role = 'client_admin'
+            profile.save()
+        except Client.DoesNotExist:
+            pass
 
     # Prepare and send the welcome email
     subject = "Welcome to Neura 3D - Your Account Credentials"
@@ -128,13 +185,29 @@ The Neura 3D Team
 @permission_classes([IsAdminUser])
 def delete_member(request, pk):
     """Delete a staff member"""
+    profile = getattr(request.user, 'profile', None)
+    is_global_admin = request.user.is_superuser or (request.user.is_staff and (not profile or not profile.client))
+    
     try:
         user = User.objects.get(pk=pk, is_staff=True)
         if user.pk == request.user.pk:
             return JsonResponse({'error': 'Cannot delete your own account'}, status=400)
             
-        if user.is_superuser and not request.user.is_superuser:
-            return JsonResponse({'error': 'Permission denied: Only superusers can remove other superusers.'}, status=403)
+        is_target_global_admin = user.is_superuser or (user.is_staff and (not getattr(user, 'profile', None) or not user.profile.client))
+        
+        if is_target_global_admin and not is_global_admin:
+            return JsonResponse({'error': 'Permission denied: Only global admins can remove other global admins.'}, status=403)
+            
+        if not is_global_admin:
+            # Check client boundary
+            req_profile = profile
+            user_profile = getattr(user, 'profile', None)
+            
+            if not req_profile or not req_profile.client:
+                return JsonResponse({'error': 'Unauthorized'}, status=403)
+                
+            if not user_profile or user_profile.client != req_profile.client:
+                return JsonResponse({'error': 'Permission denied: Member belongs to a different client.'}, status=403)
             
         user.delete()
         return JsonResponse({'success': True})
