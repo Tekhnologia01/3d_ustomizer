@@ -200,10 +200,10 @@ class TripoService:
             }
             
             if status == "success":
-                # Get the GLB model url from output
+                # Get the GLB model url from output (V3 uses 'model' or 'pbr_model', 'rendered_image')
                 output = task_data.get("output", {})
-                result["model_url"] = output.get("model_url")
-                result["rendered_image_url"] = output.get("rendered_image_url")
+                result["model_url"] = output.get("model_url") or output.get("pbr_model") or output.get("model")
+                result["rendered_image_url"] = output.get("rendered_image_url") or output.get("rendered_image")
                 logger.info(f"Task {task_id} completed successfully, model URL available")
                 
             return result

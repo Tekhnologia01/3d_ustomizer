@@ -141,6 +141,7 @@ def save_zones(request):
                 point3d=z.get('point3d'),
                 normal3d=z.get('normal3d'),
                 size3d=z.get('size3d'),
+                decoration_methods=z.get('decoration_methods', []),
             )
         return JsonResponse({'success': True, 'count': len(zones)})
     except Exception as e:
@@ -154,7 +155,7 @@ def get_zones(request, pk):
     zones_qs = product.zones.all()
     if not zones_qs.exists() and product.family:
         zones_qs = product.family.zones.all()
-    zones = list(zones_qs.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d'))
+    zones = list(zones_qs.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d', 'decoration_methods'))
     return JsonResponse({
         'id': product.id,
         'name': product.name,
@@ -179,7 +180,7 @@ def customize(request, pk):
     zones_qs = product.zones.all()
     if not zones_qs.exists() and product.family:
         zones_qs = product.family.zones.all()
-    zones = list(zones_qs.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d'))
+    zones = list(zones_qs.values('id', 'name', 'side', 'zone_type', 'x_percent', 'y_percent', 'width_percent', 'height_percent', 'angle', 'actual_width', 'actual_height', 'source', 'point3d', 'normal3d', 'size3d', 'decoration_methods'))
     
     def get_imprint_methods(p):
         methods = list(p.available_imprint_methods.all())
@@ -588,9 +589,17 @@ def create_product(request):
             import logging
             logger = logging.getLogger(__name__)
             
-            # Check if it's a direct image URL
+            # Check if it's a direct image URL (parse path so query params don't interfere)
             image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
-            if any(external_url.lower().endswith(ext) for ext in image_extensions):
+            parsed_ext_url = urlparse(external_url)
+            url_path_lower = parsed_ext_url.path.lower()
+            is_direct_image = (
+                any(url_path_lower.endswith(ext) for ext in image_extensions)
+                or any(ext.lstrip('.') in parsed_ext_url.query.lower().split('&') or
+                       f'format={ext.lstrip(".")}' in parsed_ext_url.query.lower()
+                       for ext in image_extensions)
+            )
+            if is_direct_image:
                 logger.info(f"external_product_url is a direct image URL, storing in image_url: {external_url}")
                 p.image_url = external_url
             else:
@@ -709,6 +718,7 @@ def create_product(request):
             'top_image_url': p.get_top_image_url,
             'model_3d': p.get_model_3d_url,
             'model_3d_url': p.get_model_3d_url,
+            'client_slug': p.client.slug if p.client else None,
             'external_product_url': p.external_product_url,
             'external_product_id': p.external_product_id or None,
             'family_key': p.family.family_key if p.family else None,
@@ -784,9 +794,16 @@ def update_product(request, pk):
             import logging
             logger = logging.getLogger(__name__)
             
-            # Check if it's a direct image URL
+            # Check if it's a direct image URL (parse path so query params like ?format=webp don't interfere)
             image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
-            if any(external_url.lower().endswith(ext) for ext in image_extensions):
+            _parsed_ext = urlparse(external_url)
+            _ext_path_lower = _parsed_ext.path.lower()
+            _ext_query_lower = _parsed_ext.query.lower()
+            is_direct_image = (
+                any(_ext_path_lower.endswith(ext) for ext in image_extensions)
+                or any(f'format={ext.lstrip(".")}' in _ext_query_lower for ext in image_extensions)
+            )
+            if is_direct_image:
                 logger.info(f"external_product_url is a direct image URL, storing in image_url: {external_url}")
                 p.image_url = external_url
             else:
@@ -1018,6 +1035,41 @@ def reset_tripo_status(request, pk):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
+
+def _generate_tripo_from_url(image_url, texture_quality='standard'):
+    """
+    Download a remote image to a temp file and upload it to Tripo.
+    The Tripo v3 image-to-model API requires a file_token, not a raw URL.
+    Returns task_id on success, raises Exception on failure.
+    """
+    import tempfile, os
+    from urllib.parse import urlparse
+    from customizer.services.tripo import TripoService
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"Downloading image for Tripo upload: {image_url}")
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    response = requests.get(image_url, headers=headers, timeout=20)
+    response.raise_for_status()
+
+    parsed = urlparse(image_url)
+    ext = os.path.splitext(parsed.path)[1].lower() or '.jpg'
+    if ext not in ['.jpg', '.jpeg', '.png', '.webp']:
+        ext = '.jpg'
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        tmp.write(response.content)
+        tmp_path = tmp.name
+
+    logger.info(f"Downloaded {len(response.content)} bytes → temp file: {tmp_path}")
+    try:
+        return TripoService.generate_from_local_file(tmp_path, texture_quality=texture_quality)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 @csrf_exempt
 @require_POST
 def generate_product_3d(request, pk):
@@ -1118,19 +1170,19 @@ def generate_product_3d(request, pk):
                     if os.path.exists(temp_path):
                         os.unlink(temp_path)
             else:
-                # Assumes the image_url is public
-                logger.info(f"Using public URL method for: {p.image_url}")
+                # Download the remote image and upload to Tripo via file_token.
+                # The Tripo v3 API does NOT accept raw image URLs — it requires a file_token.
+                logger.info(f"Downloading remote image and uploading to Tripo: {p.image_url}")
                 try:
-                    task_id = TripoService.generate_from_image(p.image_url, texture_quality=texture_quality)
+                    task_id = _generate_tripo_from_url(p.image_url, texture_quality=texture_quality)
                 except Exception as e:
-                    logger.error(f"Tripo API call failed for public URL: {e}")
+                    logger.error(f"Tripo generation failed from image_url: {e}")
                     import traceback
                     return JsonResponse({
-                        'error': f'Tripo API error: {str(e)}',
+                        'error': f'Could not generate 3D model from product image: {str(e)}',
                         'debug_info': {
                             'traceback': traceback.format_exc(),
                             'image_url': p.image_url,
-                            'note': 'Failed to generate 3D model from public URL'
                         }
                     }, status=400)
         elif p.external_product_url:
@@ -1138,23 +1190,31 @@ def generate_product_3d(request, pk):
             logger = logging.getLogger(__name__)
             
             # Check if external_product_url is actually a direct image URL
+            # Parse the path to ignore query params like ?format=webp&width=1200
             image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
-            if any(p.external_product_url.lower().endswith(ext) for ext in image_extensions):
+            from urllib.parse import urlparse as _urlparse
+            _parsed = _urlparse(p.external_product_url)
+            _path_lower = _parsed.path.lower()
+            _query_lower = _parsed.query.lower()
+            is_direct_image = (
+                any(_path_lower.endswith(ext) for ext in image_extensions)
+                or any(f'format={ext.lstrip(".")}'  in _query_lower for ext in image_extensions)
+            )
+            if is_direct_image:
                 # It's a direct image URL, store it in image_url and use it
                 logger.info(f"external_product_url appears to be a direct image URL, storing it in image_url: {p.external_product_url}")
                 p.image_url = p.external_product_url
                 p.save()
                 try:
-                    task_id = TripoService.generate_from_image(p.image_url, texture_quality=texture_quality)
+                    task_id = _generate_tripo_from_url(p.image_url, texture_quality=texture_quality)
                 except Exception as e:
-                    logger.error(f"Tripo API call failed for external product URL (direct image): {e}")
+                    logger.error(f"Tripo generation failed from direct image URL: {e}")
                     import traceback
                     return JsonResponse({
-                        'error': f'Tripo API error: {str(e)}',
+                        'error': f'Could not generate 3D model from product image: {str(e)}',
                         'debug_info': {
                             'traceback': traceback.format_exc(),
-                            'external_product_url': p.external_product_url,
-                            'note': 'Failed to generate 3D model from external product URL (direct image)'
+                            'image_url': p.image_url,
                         }
                     }, status=400)
             else:
@@ -1239,17 +1299,16 @@ def generate_product_3d(request, pk):
                     if p.image_url:
                         logger.info(f"Falling back to existing image_url: {p.image_url}")
                         try:
-                            task_id = TripoService.generate_from_image(p.image_url, texture_quality=texture_quality)
+                            task_id = _generate_tripo_from_url(p.image_url, texture_quality=texture_quality)
                         except Exception as e:
-                            logger.error(f"Tripo API call failed for fallback image_url: {e}")
+                            logger.error(f"Tripo generation failed for fallback image_url: {e}")
                             import traceback
                             return JsonResponse({
-                                'error': f'Tripo API error: {str(e)}',
+                                'error': f'Could not generate 3D model from product image: {str(e)}',
                                 'debug_info': {
                                     'traceback': traceback.format_exc(),
                                     'fallback_image_url': p.image_url,
                                     'external_product_url': p.external_product_url,
-                                    'note': 'Failed to generate 3D model from fallback image URL'
                                 }
                             }, status=400)
                     else:
@@ -1278,17 +1337,16 @@ def generate_product_3d(request, pk):
                     logger.info(f"Stored scraped image URL in database for product {p.id}")
                     
                     try:
-                        task_id = TripoService.generate_from_image(p.image_url, texture_quality=texture_quality)
+                        task_id = _generate_tripo_from_url(scraped_img_url, texture_quality=texture_quality)
                     except Exception as e:
-                        logger.error(f"Tripo API call failed for scraped image: {e}")
+                        logger.error(f"Tripo generation failed for scraped image: {e}")
                         import traceback
                         return JsonResponse({
-                            'error': f'Tripo API error: {str(e)}',
+                            'error': f'Could not generate 3D model from scraped product image: {str(e)}',
                             'debug_info': {
                                 'traceback': traceback.format_exc(),
                                 'scraped_image_url': scraped_img_url,
                                 'external_product_url': p.external_product_url,
-                                'note': 'Failed to generate 3D model from scraped image'
                             }
                         }, status=400)
         else:
@@ -1541,8 +1599,8 @@ def complete_tripo_generation(request):
             
             return JsonResponse({
                 'success': True,
-                'model_url': model_owner.get_model_3d_url(),
-                'preview_url': product.image.url if product.image else None,
+                'model_url': model_owner.get_model_3d_url,
+                'preview_url': product.get_image_url,
                 'message': '3D model downloaded and stored successfully'
             })
         finally:

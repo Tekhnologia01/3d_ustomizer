@@ -160,57 +160,88 @@ class Product(models.Model):
 
     @property
     def get_image_url(self):
-        if self.image:
+        # Prevent returning the 3D snapshot (tripo preview) if we have the original image_url
+        is_preview = self.image and '_preview.' in getattr(self.image, 'name', '')
+        if self.image and not is_preview:
             try:
                 return self.image.url
             except Exception:
                 pass
         if self.image_url and self.image_url.strip():
             return self.image_url.strip()
+        if self.image:
+            try:
+                return self.image.url
+            except Exception:
+                pass
         return None
 
     @property
     def get_back_image_url(self):
-        if self.back_image:
+        is_preview = self.back_image and '_preview.' in getattr(self.back_image, 'name', '')
+        if self.back_image and not is_preview:
             try:
                 return self.back_image.url
             except Exception:
                 pass
         if self.back_image_url and self.back_image_url.strip():
             return self.back_image_url.strip()
+        if self.back_image:
+            try:
+                return self.back_image.url
+            except Exception:
+                pass
         return None
 
     @property
     def get_left_image_url(self):
-        if self.left_image:
+        is_preview = self.left_image and '_preview.' in getattr(self.left_image, 'name', '')
+        if self.left_image and not is_preview:
             try:
                 return self.left_image.url
             except Exception:
                 pass
         if self.left_image_url and self.left_image_url.strip():
             return self.left_image_url.strip()
+        if self.left_image:
+            try:
+                return self.left_image.url
+            except Exception:
+                pass
         return None
 
     @property
     def get_right_image_url(self):
-        if self.right_image:
+        is_preview = self.right_image and '_preview.' in getattr(self.right_image, 'name', '')
+        if self.right_image and not is_preview:
             try:
                 return self.right_image.url
             except Exception:
                 pass
         if self.right_image_url and self.right_image_url.strip():
             return self.right_image_url.strip()
+        if self.right_image:
+            try:
+                return self.right_image.url
+            except Exception:
+                pass
         return None
 
     @property
     def get_top_image_url(self):
-        if self.top_image:
+        is_preview = self.top_image and '_preview.' in getattr(self.top_image, 'name', '')
+        if self.top_image and not is_preview:
             try:
                 return self.top_image.url
             except Exception:
                 pass
         if self.top_image_url and self.top_image_url.strip():
             return self.top_image_url.strip()
+        if self.top_image:
+            try:
+                return self.top_image.url
+            except Exception:
+                pass
         return None
 
     @property
@@ -325,6 +356,7 @@ class DesignZone(models.Model):
     point3d       = models.JSONField(null=True, blank=True, help_text="[x,y,z] hit point in 3D local space")
     normal3d      = models.JSONField(null=True, blank=True, help_text="[x,y,z] surface normal in 3D local space")
     size3d        = models.JSONField(null=True, blank=True, help_text="[w,h,d] decal bounds in 3D world space")
+    decoration_methods = models.JSONField(default=list, blank=True, help_text="List of allowed decoration methods for this zone")
 
     def __str__(self):
         owner_name = self.product.name if self.product else (self.family.name if self.family else 'Unassigned')
